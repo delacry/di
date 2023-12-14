@@ -45,7 +45,6 @@ final class NeonAdapter implements Nette\DI\Config\Adapter
 		$node = $traverser->traverse($node, $this->firstClassCallableVisitor(...));
 		$node = $traverser->traverse($node, $this->removeUnderscoreVisitor(...));
 		$node = $traverser->traverse($node, $this->convertAtSignVisitor(...));
-		$node = $traverser->traverse($node, $this->deprecatedParametersVisitor(...));
 		$node = $traverser->traverse($node, $this->resolveConstantsVisitor(...));
 		$node = $traverser->traverse($node, $this->preventMergingVisitor(...));
 		$this->connectParentsVisitor($traverser, $node);
@@ -215,9 +214,6 @@ final class NeonAdapter implements Nette\DI\Config\Adapter
 			if ($attr->value instanceof Node\LiteralNode && $attr->value->value === '_') {
 				unset($node->attributes[$i]);
 				$index = true;
-
-			} elseif ($attr->value instanceof Node\LiteralNode && $attr->value->value === '...') {
-				throw new Nette\DI\InvalidConfigurationException("Replace ... with _ in configuration file '$this->file'.");
 			}
 		}
 
@@ -240,17 +236,6 @@ final class NeonAdapter implements Nette\DI\Config\Adapter
 			&& str_starts_with($node->value, '@@')
 		) {
 			trigger_error("There is no need to escape @ anymore, replace @@ with @ and put string in quotes: '$node->value' (used in $this->file)", E_USER_DEPRECATED);
-		}
-	}
-
-
-	private function deprecatedParametersVisitor(Node $node): void
-	{
-		if (($node instanceof Node\StringNode || $node instanceof Node\LiteralNode)
-			&& is_string($node->value)
-			&& str_contains($node->value, '%parameters%')
-		) {
-			throw new Nette\DeprecatedException('%parameters% is deprecated, use @container::getParameters() (in ' . $this->file . ')');
 		}
 	}
 
