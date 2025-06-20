@@ -15,7 +15,6 @@ use Nette\DI\Resolver;
 use Nette\DI\ServiceCreationException;
 use Nette\PhpGenerator as Php;
 use Nette\Utils\Callback;
-use Nette\Utils\Validators;
 use function array_keys, class_exists, explode, is_array, is_string, str_contains, str_starts_with, substr;
 
 
@@ -73,7 +72,7 @@ final class Statement extends Expression implements Nette\Schema\DynamicParamete
 
 	public function resolveType(Resolver $resolver): ?string
 	{
-		$entity = $this->normalizeEntity($resolver);
+		$entity = $resolver->normalizeEntity($this);
 
 		if (is_array($entity)) {
 			if ($entity[0] instanceof Expression) {

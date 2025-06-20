@@ -162,14 +162,14 @@ final class ServiceDefinition extends Definition
 	{
 		$entity = $this->creator->getEntity();
 		if ($entity instanceof Reference && !$this->creator->arguments && !$this->setup) {
-			$entity->complete($resolver);
-			$this->setCreator([new Reference(Nette\DI\ContainerBuilder::ThisContainer), 'getService'], [$entity->getValue()]);
+			$ref = $resolver->normalizeReference($entity);
+			$this->setCreator([new Reference(Nette\DI\ContainerBuilder::ThisContainer), 'getService'], [$ref->getValue()]);
 		}
 
-		$this->creator->complete($resolver);
+		$this->creator = $resolver->completeStatement($this->creator);
 
-		foreach ($this->setup as $setup) {
-			$setup->complete($resolver->withCurrentServiceAvailable());
+		foreach ($this->setup as &$setup) {
+			$setup = $resolver->withCurrentServiceAvailable()->completeStatement($setup);
 		}
 	}
 
