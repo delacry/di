@@ -113,6 +113,26 @@ $container->get(RedisCache::class); // RedisCache is the only one
 
 The autowiring index registers each service under all its parent classes and interfaces; the tag filter narrows the candidates to the matching identity.
 
+### Tag-keyed bag-of-services autowire: `array<string, T>`
+
+A constructor parameter PHPDoc-typed as `array<string, T>` is autowired as a tag-keyed map of every autowired service implementing `T`:
+
+```php
+class PoolRegistry
+{
+    /**
+     * @param array<string, CacheInterface> $pools
+     */
+    public function __construct(
+        public readonly array $pools,
+    ) {}
+}
+```
+
+Given the services above, `$pools` is filled with `['fast' => $redisCache, 'slow' => $fsCache, 'default' => $fallback]`. The generated container emits the array literal at compile time - no runtime aggregation.
+
+The pre-existing `T[]`, `list<T>` and `array<int, T>` patterns continue to autowire as numerically-keyed lists, unchanged from upstream. If two services of the same type share the same identity tag, the `array<string, T>` autowire throws at compile time (the tag → service mapping must be unambiguous).
+
 ### `Container::findByTypeAndTag($type, ?$tag)`
 
 Returns service names matching `(type, tag)` from the precomputed index. With `$tag` null, returns the full `tag → names` map for the type. Useful for collecting all implementations of an interface broken down by tag.

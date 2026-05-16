@@ -41,7 +41,8 @@ Use `git log d16957a..` to see the actual hashes; the list above is order-of-app
 **Runtime container API:**
 - `Container::get(string $type, ?string $tag = null): object` — canonical lookup. Always throws on miss/ambiguity. O(1) via the precomputed index.
 - `Container::getByType($type, $throw, ?$tag)` — same shape with optional `$throw=false` for nullable returns and explicit `$tag`.
-- `Container::findByTypeAndTag($type, ?$tag)` — index introspection (powers planned bag-of-services autowire).
+- `Container::findByTypeAndTag($type, ?$tag)` — index introspection.
+- `array<string, T>` PHPDoc-typed constructor parameters get autowired as a tag→service map (via `Resolver::isArrayOf` extension). Compile-time error if two services share an identity tag for the same type. The pre-existing `T[]`/`list<T>`/`array<int, T>` patterns are unchanged — they still autowire as numerically-keyed lists.
 - `Container::$byTypeAndTag` — `array<class-string, array<tag, list<name>>>`, populated from the high-priority autowiring slot at compile time.
 - `Container::$serviceTags` — `array<service_name, string>`, only populated for services whose identity tag is non-default (saves bytes in the generated container).
 - `Container::getService($name)` — kept for back-compat with name-based registration, but `@deprecated` (docblock-only — no runtime `E_USER_DEPRECATED`, since `get()` calls `getService()` internally).

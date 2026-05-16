@@ -193,9 +193,34 @@ class Resolver
 		$this->currentServiceAllowed = $currentServiceAllowed;
 		$entity = $this->normalizeEntity($statement);
 		$arguments = $this->convertReferences($statement->arguments);
-		$getter = fn(string $type, bool $single) => $single
-				? $this->getByType($type)
-				: array_values(array_filter($this->builder->findAutowired($type), fn($obj) => $obj !== $this->currentService));
+		$getter = function (string $type, bool $single, bool $tagged = false) {
+			if ($single) {
+				return $this->getByType($type);
+			}
+
+			$matches = array_filter($this->builder->findAutowired($type), fn($obj) => $obj !== $this->currentService);
+			if (!$tagged) {
+				return array_values($matches);
+			}
+
+			$result = [];
+			foreach ($matches as $name => $def) {
+				$itemTag = $def->getTag();
+				if (isset($result[$itemTag])) {
+					throw new ServiceCreationException(sprintf(
+						"Cannot autowire array<string, %s>: services '%s' and '%s' share the identity tag '%s'.",
+						$type,
+						$result[$itemTag]->getName(),
+						$name,
+						$itemTag,
+					));
+				}
+
+				$result[$itemTag] = $def;
+			}
+
+			return $result;
+		};
 
 		switch (true) {
 			case $statement->arguments === self::getFirstClassCallable():
@@ -550,7 +575,7 @@ class Resolver
 	/**
 	 * Add missing arguments using autowiring.
 	 * @param  array<mixed>  $arguments
-	 * @param  (callable(string, bool): (object|object[]|null))  $getter
+	 * @param  (callable(string, bool, bool=): (object|object[]|null))  $getter
 	 * @return array<mixed>
 	 * @throws ServiceCreationException
 	 */
@@ -625,7 +650,7 @@ class Resolver
 
 	/**
 	 * Resolves missing argument using autowiring.
-	 * @param  (callable(string, bool): (object|object[]|null))  $getter
+	 * @param  (callable(string, bool, bool=): (object|object[]|null))  $getter
 	 * @throws ServiceCreationException
 	 */
 	private static function autowireArgument(\ReflectionParameter $parameter, callable $getter): mixed
@@ -659,8 +684,9 @@ class Resolver
 				));
 			}
 
-		} elseif ($itemType = self::isArrayOf($parameter, $type)) {
-			return $getter($itemType, false);
+		} elseif ($arrayOf = self::isArrayOf($parameter, $type)) {
+			[$itemType, $tagged] = $arrayOf;
+			return $getter($itemType, false, $tagged);
 
 		} elseif ($parameter->isOptional()) {
 			return null;
@@ -675,20 +701,39 @@ class Resolver
 	}
 
 
-	private static function isArrayOf(\ReflectionParameter $parameter, ?Nette\Utils\Type $type): ?string
+	/**
+	 * Detects PHPDoc array-of-services patterns on a parameter. Returns [itemType, tagged]
+	 * where tagged is true for `array<string, T>` (yields a tag→service map at autowire
+	 * time) and false for `T[]` / `list<T>` / `array<int, T>` (yields a numeric list).
+	 *
+	 * @return array{class-string, bool}|null
+	 */
+	private static function isArrayOf(\ReflectionParameter $parameter, ?Nette\Utils\Type $type): ?array
 	{
 		$method = $parameter->getDeclaringFunction();
-		return $method instanceof \ReflectionMethod
-			&& $type?->getSingleName() === 'array'
-			&& preg_match(
-				'#@param[ \t]+(?|([\w\\\]+)\[\]|list<([\w\\\]+)>|array<int,\s*([\w\\\]+)>)[ \t]+\$' . $parameter->name . '#',
-				(string) $method->getDocComment(),
-				$m,
-			)
-			&& ($itemType = Reflection::expandClassName($m[1], $method->getDeclaringClass()))
-			&& (class_exists($itemType) || interface_exists($itemType))
-				? $itemType
-				: null;
+		if (!$method instanceof \ReflectionMethod || $type?->getSingleName() !== 'array') {
+			return null;
+		}
+
+		$docComment = (string) $method->getDocComment();
+		$nameRe = preg_quote($parameter->name, '#');
+
+		// tagged map: array<string, T>
+		if (preg_match('#@param[ \t]+array<string,\s*([\w\\\\]+)>[ \t]+\$' . $nameRe . '#', $docComment, $m)) {
+			$tagged = true;
+		// untagged list: T[] | list<T> | array<int, T>
+		} elseif (preg_match('#@param[ \t]+(?|([\w\\\\]+)\[\]|list<([\w\\\\]+)>|array<int,\s*([\w\\\\]+)>)[ \t]+\$' . $nameRe . '#', $docComment, $m)) {
+			$tagged = false;
+		} else {
+			return null;
+		}
+
+		$itemType = Reflection::expandClassName($m[1], $method->getDeclaringClass());
+		if (!class_exists($itemType) && !interface_exists($itemType)) {
+			return null;
+		}
+
+		return [$itemType, $tagged];
 	}
 
 

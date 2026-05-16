@@ -572,9 +572,34 @@ class Container
 	 */
 	private function autowireArguments(\ReflectionFunctionAbstract $function, array $args = []): array
 	{
-		return Resolver::autowireArguments($function, $args, fn(string $type, bool $single) => $single
-				? $this->getByType($type)
-				: array_map($this->getService(...), $this->findAutowired($type)));
+		return Resolver::autowireArguments($function, $args, function (string $type, bool $single, bool $tagged = false) {
+			if ($single) {
+				return $this->getByType($type);
+			}
+
+			$names = $this->findAutowired($type);
+			if (!$tagged) {
+				return array_map($this->getService(...), $names);
+			}
+
+			$result = [];
+			foreach ($names as $name) {
+				$itemTag = $this->serviceTags[$name] ?? Definition::DefaultTag;
+				if (isset($result[$itemTag])) {
+					throw new MissingServiceException(sprintf(
+						"Cannot autowire array<string, %s>: services '%s' and '%s' share the identity tag '%s'.",
+						$type,
+						array_search($result[$itemTag], $this->instances, true) ?: '?',
+						$name,
+						$itemTag,
+					));
+				}
+
+				$result[$itemTag] = $this->getService($name);
+			}
+
+			return $result;
+		});
 	}
 
 
