@@ -1,3 +1,6 @@
 /vendor
 /composer.lock
 tests/lock
+/.idea/
+/php.ini
+/test.php

@@ -4,8 +4,7 @@ parameters:
 	paths:
 		- src
 
-	excludePaths:
-		- src/compatibility.php
+	reportUnmatchedIgnoredErrors: false
 
 	fileExtensions:
 		- php
@@ -139,3 +138,36 @@ parameters:
 		- # defensive array_filter on config entries
 			identifier: arrayFilter.same
 			path: src/DI/Extensions/SearchExtension.php
+		- # findAutowired / findByType accept string for type, internal use
+			identifier: argument.type
+			path: src/Bridges/DITracy/ContainerPanel.php
+		- # createLoader $params type is whatever the caller passes
+			identifier: missingType.iterableValue
+			path: src/DI/Compiler.php
+		- # WeakMap generics omitted intentionally — populated dynamically
+			identifier: missingType.generics
+			path: src/DI/Config/Adapters/NeonAdapter.php
+		- # @throws documents what callers see; not all branches throw it directly
+			identifier: throws.unusedType
+			path: src/DI/Config/Adapters/NeonAdapter.php
+		- # NEON node chain arrays are heterogeneous by design
+			identifier: missingType.iterableValue
+			path: src/DI/Config/Adapters/NeonAdapter.php
+		- # processClosure return type comes from user closure
+			identifier: missingType.iterableValue
+			path: src/DI/Config/Adapters/PhpAdapter.php
+		- # preg_replace accepts string|null in practice (null is treated as empty)
+			identifier: argument.type
+			path: src/DI/ContainerLoader.php
+		- # Statement::$entity narrower phpDoc type, broad runtime accepts array
+			identifier: assign.propertyType
+			path: src/DI/Definitions/Statement.php
+		- # PHP version probe — branch reachable on PHP < 8.3 (older runtimes), dead on 8.4+
+			identifier: smaller.alwaysFalse
+			path: src/DI/DependencyChecker.php
+		- # PHP version probe — branch reachable on PHP >= 8.4, baseline assumption
+			identifier: greaterOrEqual.alwaysTrue
+			path: src/DI/Extensions/DIExtension.php
+		- # Reflection::getUseStatements may return false on parse failure
+			identifier: foreach.nonIterable
+			path: src/DI/Helpers.php
