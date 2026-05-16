@@ -1,364 +1,166 @@
-[![Nette Dependency Injection](https://github.com/nette/di/assets/194960/d368a458-bac1-48b1-9b4b-7929f4bb2f98)](https://doc.nette.org/dependency-injection)
+# nette/di - delacry fork
 
-[![Downloads this Month](https://img.shields.io/packagist/dm/nette/di.svg)](https://packagist.org/packages/nette/di)
-[![Tests](https://github.com/nette/di/workflows/Tests/badge.svg?branch=master)](https://github.com/nette/di/actions)
-[![Coverage Status](https://coveralls.io/repos/github/nette/di/badge.svg?branch=master)](https://coveralls.io/github/nette/di?branch=master)
-[![Latest Stable Version](https://poser.pugx.org/nette/di/v/stable)](https://github.com/nette/di/releases)
-[![License](https://img.shields.io/badge/license-New%20BSD-blue.svg)](https://github.com/nette/di/blob/master/license.md)
+A fork of [nette/di](https://github.com/nette/di) that adds **tag-based dependency injection** for services of the same type, so you can register multiple implementations of an interface and pick the right one at the injection site by tag.
 
- <!---->
+## Why this fork exists
 
-Introduction
-------------
+[nette/di#321](https://github.com/nette/di/pull/321) - *InjectExtension: added support for injecting services by tags* - has been open against upstream since May 2025 with no movement. This fork picks the feature up, ships it, and extends the model further: a first-class identity tag on every service definition, a new canonical `Container::get()` lookup, NEON `@Type#tag` reference syntax, and an O(1) precomputed `(type, tag)` index on the compiled container.
 
-Purpose of the Dependecy Injection (DI) is to free classes from the responsibility for obtaining objects that they need for its operation (these objects are called **services**). To pass them these services on their instantiation instead.
+For everything else about Nette DI - service definitions, factories, decorators, NEON syntax, autowiring rules, extension authoring - see [nette/di's documentation](https://doc.nette.org/dependency-injection). All of it works the same here. This README only covers what's different.
 
-Nette DI is one of the most interesting part of framework. It is compiled DI container, extremely fast and easy to configure.
+## What's new
 
-Documentation can be found on the [website](https://doc.nette.org/dependency-injection).
-
- <!---->
-
-[Support Me](https://github.com/sponsors/dg)
---------------------------------------------
-
-Do you like Nette DI? Are you looking forward to the new features?
-
-[![Buy me a coffee](https://files.nette.org/icons/donation-3.svg)](https://github.com/sponsors/dg)
-
-Thank you!
-
- <!---->
-
-Installation
-------------
-
-The recommended way to install is via Composer:
-
-```
-composer require nette/di
-```
-
-It requires PHP version 8.2 and supports PHP up to 8.5.
-
- <!---->
-
-Usage
------
-
-Let's have an application for sending newsletters. The code is maximally simplified and is available on the [GitHub](https://github.com/dg/di-example).
-
-We have the object representing email:
-
-```php
-class Mail
-{
-	public string $subject;
-	public string $message;
-}
-```
-
-An object which can send emails:
-
-```php
-interface Mailer
-{
-	function send(Mail $mail, string $to): void;
-}
-```
-
-A support for logging:
-
-```php
-interface Logger
-{
-	function log(string $message): void;
-}
-```
-
-And finally, a class that provides sending newsletters:
-
-```php
-class NewsletterManager
-{
-	private Mailer $mailer;
-	private Logger $logger;
-
-	public function __construct(Mailer $mailer, Logger $logger)
-	{
-		$this->mailer = $mailer;
-		$this->logger = $logger;
-	}
-
-	public function distribute(array $recipients): void
-	{
-		$mail = new Mail;
-		$mail->subject = '...';
-		$mail->message = '...';
-
-		foreach ($recipients as $recipient) {
-			$this->mailer->send($mail, $recipient);
-		}
-		$this->logger->log('...');
-	}
-}
-```
-
-The code respects Dependency Injection, ie. **each object uses only variables which we had passed into it.**
-
-Also, we have a ability to implement own `Logger` or `Mailer`, like this:
-
-```php
-class SendMailMailer implements Mailer
-{
-	public function send(Mail $mail, string $to): void
-	{
-		mail($to, $mail->subject, $mail->message);
-	}
-}
-
-class FileLogger implements Logger
-{
-	private string $file;
-
-	public function __construct(string $file)
-	{
-		$this->file = $file;
-	}
-
-	public function log(string $message): void
-	{
-		file_put_contents($this->file, $message . "\n", FILE_APPEND);
-	}
-}
-```
-
-**DI container is the supreme architect** which can create individual objects (in the terminology DI called services) and assemble and configure them exactly according to our needs.
-
-Container for our application might look like this:
-
-```php
-class Container
-{
-	private ?Logger $logger;
-	private ?Mailer $mailer;
-
-	public function getLogger(): Logger
-	{
-		if (!isset($this->logger)) {
-			$this->logger = new FileLogger('log.txt');
-		}
-		return $this->logger;
-	}
-
-	public function getMailer(): Mailer
-	{
-		if (!isset($this->mailer)) {
-			$this->mailer = new SendMailMailer;
-		}
-		return $this->mailer;
-	}
-
-	public function createNewsletterManager(): NewsletterManager
-	{
-		return new NewsletterManager($this->getMailer(), $this->getLogger());
-	}
-}
-```
-
-The implementation looks like this because:
-- the individual services are created only on demand (lazy loading)
-- doubly called `createNewsletterManager` will use the same logger and mailer instances
-
-Let's instantiate `Container`, let it create manager and we can start spamming users with newsletters :-)
-
-```php
-$container = new Container;
-$manager = $container->createNewsletterManager();
-$manager->distribute(...);
-```
-
-Significant to Dependency Injection is that no class depends on the container. Thus it can be easily replaced with another one. For example with the container generated by Nette DI.
-
- <!---->
-
-Nette DI
-----------
-
-Nette DI is the generator of containers. We instruct it (usually) with configuration files. This is configuration that leads to generate nearly the same class as the class `Container` above:
-
-```neon
-services:
-	- FileLogger( log.txt )
-	- SendMailMailer
-	- NewsletterManager
-```
-
-The big advantage is the shortness of configuration.
-
-Nette DI actually generates PHP code of container. Therefore it is extremely fast. Developer can see the code, so he knows exactly what it is doing. He can even trace it.
-
-Usage of Nette DI is very easy. Save the (above) configuration to the file `config.neon` and let's create a container:
-
-```php
-$loader = new Nette\DI\ContainerLoader(__DIR__ . '/temp');
-$class = $loader->load(function($compiler) {
-    $compiler->loadConfig(__DIR__ . '/config.neon');
-});
-$container = new $class;
-```
-
-and then use container to create object `NewsletterManager` and we can send e-mails:
-
-```php
-$manager = $container->getByType(NewsletterManager::class);
-$manager->distribute(['john@example.com', ...]);
-```
-
-The container will be generated only once and the code is stored in cache (in directory `__DIR__ . '/temp'`).  Therefore the loading of configuration file is placed in the closure in `$loader->load()`, so it is called only once.
-
-During development it is useful to activate auto-refresh mode which automatically regenerate the container when any class or configuration file is changed. Just in the constructor `ContainerLoader` append `true` as the second argument:
-
-```php
-$loader = new Nette\DI\ContainerLoader(__DIR__ . '/temp', autoRebuild: true);
-```
-
- <!---->
-
-Services
---------
-
-Services are registered in the DI container and their dependencies are automatically passed.
-
-```neon
-services:
-	manager: NewsletterManager
-```
-
-All dependencies declared in the constructor of this service will be automatically passed. Constructor passing is the preferred way of dependency injection for services.
-
-If we want to pass dependencies by the setter, we can add the `setup` section to the service definition:
-
-```neon
-services:
-	manager:
-		factory: NewsletterManager
-		setup:
-			- setAnotherService
-```
-
-Class of the service:
-
-```php
-class NewsletterManager
-{
-	private AnotherService $anotherService;
-
-	public function setAnotherService(AnotherService $service): void
-	{
-		$this->anotherService = $service;
-	}
-
-...
-```
-
-We can also add the `inject: yes` directive. This directive will enable automatic call of `inject*` methods and passing dependencies to public variables with #[Inject] attribute:
-
-```neon
-services:
-	foo:
-		factory: FooClass
-		inject: yes
-```
-
-Dependency `Service1` will be passed by calling the `inject*` method, dependency `Service2` will be assigned to the `$service2` variable:
+### `#[Inject(tag: 'X')]` on properties, constructor parameters, and inject methods
 
 ```php
 use Nette\DI\Attributes\Inject;
 
-class FooClass
+class OrderService
 {
-	private Service1 $service1;
-
-	// 1) inject* method:
-
-	public function injectService1(Service1 $service): void
-	{
-		$this->service1 = $service1;
-	}
-
-	// 2) Assign to the variable with the #[Inject] attribute:
-
-	#[Inject]
-	public Service2 $service2;
+    public function __construct(
+        #[Inject(tag: 'fast')]
+        public readonly CacheInterface $cache,
+    ) {}
 }
 ```
 
-However, this method is not ideal, because the variable must be declared as public and there is no way how you can ensure that the passed object will be of the given type. We also lose the ability to handle the assigned dependency in our code and we violate the principles of encapsulation.
-
-
- <!---->
-
-Factories
----------
-
-We can use factories generated from an interface. The interface must declare the returning type of the method. Nette will generate a proper implementation of the interface.
-
-The interface must have exactly one method named `create`. Our factory interface could be declared in the following way:
+Same attribute works on properties:
 
 ```php
-interface BarFactory
+class OrderService
 {
-	function create(): Bar;
+    #[Inject(tag: 'fast')]
+    public CacheInterface $cache;
 }
 ```
 
-The `create` method will instantiate an `Bar` with the following definition:
+…and on `inject*()` method parameters:
 
 ```php
-class Bar
+class OrderService
 {
-	private Logger $logger;
-
-	public function __construct(Logger $logger)
-	{
-		$this->logger = $logger;
-	}
+    public function injectCache(#[Inject(tag: 'fast')] CacheInterface $cache): void
+    {
+        $this->cache = $cache;
+    }
 }
 ```
 
-The factory will be registered in the `config.neon` file:
+`#[Inject]` on a constructor or inject-method parameter **requires** a tag - untagged parameters are autowired by native type already, so a bare `#[Inject]` there is redundant and throws at compile time.
+
+### Single-string identity tag per service
 
 ```neon
 services:
-	- BarFactory
+    cache.fast:
+        factory: App\Cache\RedisCache
+        tag: fast
+
+    cache.slow:
+        factory: App\Cache\FileSystemCache
+        tag: slow
+
+    fallback: App\Cache\NullCache
+    # untagged services are implicitly tagged "default"
 ```
 
-Nette will check if the declared service is an interface. If yes, it will also generate the corresponding implementation of the factory. The definition can be also written in a more verbose form:
+Or via the fluent API:
+
+```php
+$builder->addDefinition('cache.fast')
+    ->setType(App\Cache\RedisCache::class)
+    ->setTag('fast');
+```
+
+The single-string tag is intentionally distinct from upstream's existing multi-key `tags: { … }` metadata bag (which is unchanged and still works). Tags here are an *identity discriminator* used together with the service type; `tags:` is a free-form metadata bag used by extensions like `LocatorDefinition`'s `tagged:` selector.
+
+### `Container::get($type, ?$tag)` canonical lookup
+
+```php
+$cache = $container->get(CacheInterface::class, 'fast'); // RedisCache
+$cache = $container->get(CacheInterface::class);          // NullCache (untagged → default)
+```
+
+Backed by a precomputed `array<class-string, array<tag, list<name>>>` index baked into the generated container at compile time. The hot path is one hash lookup + one `count()` + one `getService()` - **~108 ns/op** on a 10-implementation interface with tag filtering, ~9.2M ops/s on a single core (measured on PHP 8.4, no opcache JIT). For comparison, plain `getService($name)` by direct name lookup measures ~40 ns/op.
+
+`get()` throws `MissingServiceException` on miss or ambiguity. For a nullable miss, use `getOrNull($type, ?$tag)` - same fast path, returns `null` instead of throwing when nothing matches. Ambiguity (multiple services match) still throws on `getOrNull()` because it's a programming error, not a "does this exist?" question.
+
+```php
+$cache = $container->getOrNull(CacheInterface::class, 'optional');  // null if not registered
+```
+
+### NEON `@Type#tag` reference syntax
 
 ```neon
 services:
-	barFactory:
-		implement: BarFactory
+    orderService:
+        factory: OrderService
+        arguments:
+            cache: @App\Cache\CacheInterface#fast
 ```
 
-This full definition allows us to declare additional configuration of the object using the `arguments` and `setup` sections, similarly as for all other services.
+Any reference value containing a backslash is treated as a type reference (this is upstream Nette's rule, not new in the fork), so namespaced FQNs like `@App\Cache\CacheInterface` work as-is. A leading `\` is only needed for global-namespace types (`@\CacheInterface#fast`) to disambiguate them from a service-name reference. NEON's own tokenizer accepts the `#tag` suffix unquoted, so no escaping required.
 
-In our code, we only have to obtain the factory instance and call the `create` method:
+### Polymorphic resolution
+
+All three of these return the same instance when `cache.fast` is the only `'fast'`-tagged service implementing `CacheInterface`:
 
 ```php
-class Foo
-{
-	private BarFactory $barFactory;
-
-	function __construct(BarFactory $barFactory)
-	{
-		$this->barFactory = $barFactory;
-	}
-
-	function bar(): void
-	{
-		$bar = $this->barFactory->create();
-	}
-}
+$container->get(CacheInterface::class, 'fast');
+$container->get(RedisCache::class, 'fast');
+$container->get(RedisCache::class); // RedisCache is the only one
 ```
+
+The autowiring index registers each service under all its parent classes and interfaces; the tag filter narrows the candidates to the matching identity.
+
+### `Container::findByTypeAndTag($type, ?$tag)`
+
+Returns service names matching `(type, tag)` from the precomputed index. With `$tag` null, returns the full `tag → names` map for the type. Useful for collecting all implementations of an interface broken down by tag.
+
+```php
+$container->findByTypeAndTag(CacheInterface::class, 'fast');
+// → ['cache.fast']
+
+$container->findByTypeAndTag(CacheInterface::class);
+// → ['fast' => ['cache.fast'], 'slow' => ['cache.slow'], 'default' => ['fallback']]
+```
+
+## What's removed
+
+- Legacy `@inject` docblock annotation fallback in `InjectExtension` (use the `#[Inject]` attribute)
+- Legacy `@var` type-hint fallback for inject properties (use native type hints)
+- `Helpers::parseAnnotation()` (no remaining callers after the @inject strip)
+- Pre-3.0 class aliases: `Nette\DI\ServiceDefinition`, `Nette\DI\Statement`, `Nette\DI\Config\IAdapter`
+- `Definition::generateMethod()` (callers updated to use `Definition::generateCode()`)
+- `Definition::isAutowired()` (use `getAutowired()`)
+
+`Definition::setClass()` / `getClass()` are kept as deprecated wrappers because tracy/tracy's DI bridge still calls them.
+
+## Deprecated (still functional)
+
+- `Container::getService($name)` - `@deprecated` docblock points at `Container::get($type, $tag)`. Docblock-only deprecation; no runtime `E_USER_DEPRECATED` is emitted, since `get()` itself calls `getService()` internally.
+
+## Backward compatibility
+
+This fork keeps the engine permissive:
+
+- `addDefinition($name, …)` with a non-null name still works
+- `services: { foo: Bar }` NEON keys still register `foo` as the service name
+- All existing tests pass (162 in total)
+
+Tag-aware features are strictly additive. Calling code that doesn't use tags behaves exactly like upstream nette/di v3.3.
+
+## Status
+
+- Based on upstream `nette/di` v3.3 (commit `d16957a`).
+- Not tracking upstream - upstream branches force-push, so changes from upstream are cherry-picked when needed.
+- Tests: 164 pass (was 157 on the v3.3 baseline; +7 new for the tag features and the `array<string, T>` bag autowire).
+- **PHP requirement: 8.4 – 8.5** (bumped from upstream's 8.2 – 8.5; the fork uses asymmetric property visibility for `Definition::$tag` and other 8.4-only conveniences). If you need 8.2 or 8.3 compatibility, stay on upstream `nette/di`.
+
+## Documentation
+
+For installation, service definitions, factories, decorators, NEON syntax, autowiring rules, extension authoring - read [nette/di's documentation](https://doc.nette.org/dependency-injection). Only the additions above are fork-specific.
+
+## License
+
+BSD-3-Clause / GPL-2.0 / GPL-3.0 (same as upstream nette/di).

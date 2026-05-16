@@ -4,900 +4,303 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**Nette DI** is a compiled Dependency Injection Container for PHP - a core component of the Nette Framework. This is a library/framework component, not an application.
+**delacry fork of Nette DI** — a compiled Dependency Injection Container for PHP, based on [nette/di](https://github.com/nette/di) v3.3 (commit `d16957a`). The fork ships [PR #321](https://github.com/nette/di/pull/321) (tag-based injection — open against upstream since May 2024 with no movement) plus a broader (type, tag) identity model layered on top of upstream's existing autowiring.
 
 **Key characteristics:**
 - Compiled container generates optimized PHP code for maximum performance
 - Full autowiring support with type-based dependency resolution
-- NEON configuration format for human-friendly service definitions
-- Supports PHP 8.1 - 8.5
+- **Tag-based identity model** on top of upstream's autowiring: every service has a single-string identity tag (`"default"` if unset), and `(type, tag)` together uniquely select a service
+- O(1) precomputed `(type, tag) → names` index on the generated container — ~108 ns/op tag-filtered lookups
+- NEON configuration format with the fork's `@Type#tag` reference syntax
+- `#[Inject(tag:)]` attribute on properties, constructor parameters, and inject-method parameters
+- Supports PHP 8.2 – 8.5
 - ~5,900 lines of production code
+
+**Not tracking upstream.** Upstream branches force-push (the original PR #321's commits got rewritten when dg moved them between branches). Pulling fixes from upstream is done by cherry-picking specific commits, not by merge or rebase.
+
+## Fork's commits (on top of upstream/v3.3 tip `d16957a`)
+
+```
+ContainerBuilder: addDefinition() name parameter defaults to null
+tag-based service identity with #[Inject(tag:)] support
+removed obsolete BC compatibility layer
+```
+
+Use `git log d16957a..` to see the actual hashes; the list above is order-of-application.
+
+## Tag identity model — what's added on top of upstream
+
+**Tag identity:**
+- `Definition::$tag` (`?string`, null = implicit `"default"`)
+- `Definition::setTag(?string $tag): static` — fluent setter
+- `Definition::getTag(): string` — always returns a string (`"default"` when null)
+- `Definition::DefaultTag = 'default'` constant
+- NEON config key: `tag: <string>` on services, accessors, factories, locators, imported services
+- This is **distinct from** the existing multi-key `Definition::$tags` metadata array (which is unchanged). The new identity tag and the legacy `tags` bag are separate concepts; `getTagValue(string $name): mixed` is the renamed accessor for the legacy bag (was `getTag(string $name)` — renamed to free the no-arg `getTag(): string` for identity).
+
+**Runtime container API:**
+- `Container::get(string $type, ?string $tag = null): object` — canonical lookup. Always throws on miss/ambiguity. O(1) via the precomputed index.
+- `Container::getByType($type, $throw, ?$tag)` — same shape with optional `$throw=false` for nullable returns and explicit `$tag`.
+- `Container::findByTypeAndTag($type, ?$tag)` — index introspection (powers planned bag-of-services autowire).
+- `Container::$byTypeAndTag` — `array<class-string, array<tag, list<name>>>`, populated from the high-priority autowiring slot at compile time.
+- `Container::$serviceTags` — `array<service_name, string>`, only populated for services whose identity tag is non-default (saves bytes in the generated container).
+- `Container::getService($name)` — kept for back-compat with name-based registration, but `@deprecated` (docblock-only — no runtime `E_USER_DEPRECATED`, since `get()` calls `getService()` internally).
+
+**Inject attribute:**
+- `Nette\DI\Attributes\Inject` accepts `?string $tag` and targets `TARGET_PROPERTY | TARGET_PARAMETER`.
+- `#[Inject(tag: 'X')]` on a **property** = tag-aware setter injection (requires service-level `inject: true` to apply).
+- `#[Inject(tag: 'X')]` on a **constructor parameter** = tag-aware autowiring override for that param (applies regardless of `inject: true` — it's a per-param directive, not a service-level opt-in).
+- `#[Inject(tag: 'X')]` on an **inject-method parameter** = tag-aware autowiring for the method call (requires `inject: true`).
+- `#[Inject]` without a tag on a constructor or inject-method param throws at compile time — bare `#[Inject]` there is redundant since untagged params are autowired by native type already.
+
+**NEON `@Type#tag` reference syntax:**
+- `Helpers::filterArguments` regex extended to `^@([\w\\]+)(?:#(\w+))?$`.
+- `@\Foo\Bar#doctrine` parses as `Reference(value='Foo\\Bar', tag='doctrine')`.
+- The leading `\` is the standard Nette convention separating type-refs from name-refs.
+- No nette/neon fork needed — `#` is only a NEON comment marker at column 0 or after whitespace, so the `#tag` suffix is accepted unquoted.
+
+**`Reference` carries the tag through compile:**
+- `Reference::__construct(string $value, ?string $tag = null)`
+- `Reference::fromType($value, ?$tag)` — type-reference factory accepts tag.
+- `Reference::getTag(): ?string` — getter (null for name-refs and untagged type-refs).
+- `Resolver::getByType($type, ?$tag)` and `Resolver::normalizeReference()` propagate the tag through resolution.
+
+**Compile-time autowiring:**
+- `Autowiring::getByType($type, $throw, ?$tag)` filters candidates by `Definition::getTag()`. Untagged services match the implicit `"default"` tag. When `$tag` is null and multiple candidates exist, prefers the `"default"`-tagged subset to break ambiguity (matches upstream's null-tag behavior).
+- `ContainerBuilder::getByType($type, $throw, ?$tag)` passes through to autowiring.
+
+## What was removed
+
+- `src/compatibility.php` — pre-3.0 class aliases (`Nette\DI\ServiceDefinition`, `Nette\DI\Statement`, `Nette\DI\Config\IAdapter`).
+- `class_exists()` warmup calls in `Definitions\Statement` and `Definitions\ServiceDefinition` that triggered the deleted compat layer.
+- `Definition::generateMethod()` — wrapper for `generateCode()`. Callers (PhpGenerator, FactoryDefinition) updated to call `generateCode()` directly.
+- `Definition::isAutowired()` — wrapper for `getAutowired()`. No callers anywhere.
+- `Helpers::parseAnnotation()` — used only by the deleted `@inject` docblock fallback. Test deleted with it.
+- `InjectExtension`'s `@inject` docblock annotation fallback and `@var`-as-type fallback. Native attributes and native types only from here on.
+
+**Kept on purpose** (still load-bearing in our context):
+- `Definition::setClass()` / `getClass()` — tracy/tracy's DI bridge still calls them.
+- `Config\Helpers` — `DefinitionSchema` still uses `takeParent()`.
+- `ContainerBuilder::formatPhp()` — `DIExtension`'s Tracy integration uses it.
+- `Compiler::getConfig()`, `Container::$parameters`, `CompilerExtension::validateConfig()` — still useful test/introspection points.
+
+## Deferred (not in this fork — intended for consumer code)
+
+The original tag-identity vision included two more constraints that didn't land in the engine fork:
+
+- **`addDefinition($name)` throwing on non-null name.** 47 test files + every Nette ecosystem extension passes names to `addDefinition()`. Keeping the engine permissive lets that code keep working; consumers who want the strict rule enforce it at config-parse time in their own bundle / config-validation layer before reaching `addDefinition()`.
+- **NEON `services: { foo: Bar }` keys becoming aliases rather than identity.** Same reason — would cascade through `ServicesExtension`, `removeDefinition`, alteration logic, and every test asserting specific service names. Consumers wanting this enforce it at their own config-validation layer.
+
+Both constraints are *configurable on top of* the engine — the deprecation markers and `findByTypeAndTag` helper signal the direction without breaking BC.
 
 ## Essential Commands
 
 ### Running Tests
 
-Tests use Nette Tester (not PHPUnit) with `.phpt` file format:
+Tests use Nette Tester (not PHPUnit) with `.phpt` file format. **Note:** the test suite needs `php.ini` (top of repo) loaded explicitly via `-c` because Tester spawns subprocesses with `-n` (no system php.ini), and the suite requires the `tokenizer` extension which the project-local `php.ini` enables.
 
 ```bash
-# Run all tests
-vendor/bin/tester tests -s -C
+# Run all DI tests
+vendor/bin/tester -p php -c php.ini tests/DI
 
-# Run specific directory
-vendor/bin/tester tests/DI/ -s -C
+# Run a single test
+vendor/bin/tester -p php -c php.ini tests/DI/Container.findByTypeAndTag.phpt
 
-# Run specific test file
-vendor/bin/tester tests/DI/Compiler.configurator.phpt -s -C
+# With info / parallelism / output
+vendor/bin/tester -p php -c php.ini -s tests/DI
+vendor/bin/tester -p php -c php.ini -j 4 tests/DI    # 4 parallel processes (default 8)
 ```
 
-**Flags explained:**
-- `-s` - show output from tests
-- `-C` - use system-wide php.ini
+The `tests/types/TypesTest.phpt` failure on baseline is pre-existing (missing `Nette\PHPStan\Tester\TypeAssert` class — not in vendor). Ignore it.
 
 ### Static Analysis
 
 ```bash
-# Run PHPStan (level 5)
-composer run phpstan
-```
-
-### Code Quality
-
-```bash
-# Quick validation
-composer run tester
-composer run phpstan
+composer phpstan
 ```
 
 ## Test Infrastructure
 
 ### Test File Structure
 
-All tests use `.phpt` format with embedded test cases:
+All tests use `.phpt` format. Bootstrap registers the `createContainer()` helper:
 
 ```php
-<?php
-declare(strict_types=1);
+<?php declare(strict_types=1);
 
+use Nette\DI;
 use Tester\Assert;
 
 require __DIR__ . '/../bootstrap.php';
 
-test('description of what is tested', function () {
-	$container = createContainer(new Compiler, 'services: ...neon...');
-	Assert::type(ServiceClass::class, $container->getByType(ServiceClass::class));
-});
+$compiler = new DI\Compiler;
+$compiler->addExtension('inject', new DI\Extensions\InjectExtension);  // tag-aware inject needs this
+$container = createContainer($compiler, '
+services:
+    cache.fast:
+        factory: RedisCache
+        tag: fast
+');
 
-testException('description', function () {
-	// code that should throw
-}, ExpectedException::class, 'Expected message');
+Assert::type(RedisCache::class, $container->get(CacheInterface::class, 'fast'));
 ```
+
+**Important: `InjectExtension` is not auto-registered by the bare `Compiler`.** The default `Compiler` only registers `ServicesExtension` + `ParametersExtension`. If a test exercises `#[Inject]` or `#[Inject(tag:)]`, the test must explicitly add `InjectExtension`.
 
 ### Test Helpers (from bootstrap.php)
 
-**`createContainer($source, $config, $params = [])`**
-- Compiles and instantiates container from config
-- `$source` can be `Compiler` or `ContainerBuilder`
-- `$config` is NEON string or file path
-- Returns compiled container instance
-- Generated code saved to `tests/tmp/{pid}/code.php` for debugging
-
-**`getTempDir()`**
-- Returns per-process temporary directory: `tests/tmp/{pid}/`
-- Automatically cleaned via garbage collection
-
-**`Notes::add($message)` / `Notes::fetch()`**
-- Test notification system for debugging
-- Add messages during execution, fetch for assertions
+- `createContainer($source, $config = null, array $params = [])` — compiles and instantiates. `$source` is `Compiler` or `ContainerBuilder`; `$config` is a NEON string or file path. Generated code lands at `tests/tmp/{pid}/code.php` for inspection.
+- `getTempDir()` — per-process scratch dir at `tests/tmp/{pid}/`, garbage collected on next run.
+- `Notes::add()` / `Notes::fetch()` — debug-message channel.
 
 ### Common Test Patterns
 
-**Testing service registration:**
-```php
-$container = createContainer(new Compiler, '
-	services:
-		- MyService
-');
-```
-
-**Testing with fixtures:**
-```php
-$loader = new Loader;
-$config = $loader->load(__DIR__ . '/files/config.neon');
-$container = createContainer(new Compiler, $config);
-```
-
-**Testing generated code:**
-```php
-$builder = new ContainerBuilder;
-$builder->addDefinition('foo')->setType(MyClass::class);
-$code = (new PhpGenerator($builder))->generate('Container1');
-// inspect $code
-```
+Tag-aware tests live in:
+- `tests/DI/Autowiring.tag.phpt` — `ContainerBuilder::getByType($type, $throw, $tag)` resolution rules.
+- `tests/DI/InjectExtension.tags.phpt` — property + ctor + inject-method polymorphic resolution.
+- `tests/DI/InjectExtension.tags.errors.phpt` — bare `#[Inject]` on ctor/inject param throws; ambiguity errors.
+- `tests/DI/NeonAdapter.tagRef.phpt` — `@\Type#tag` NEON syntax end-to-end.
+- `tests/DI/Container.findByTypeAndTag.phpt` — precomputed index introspection.
 
 ## Architecture Overview
 
 ### Compilation Flow
 
-The container compilation happens in distinct phases:
+Standard upstream flow with one new step:
 
-1. **Load** - Configuration files loaded and merged (`Config\Loader`)
-2. **Extensions** - Compiler extensions process configuration and register services (`CompilerExtension`)
-3. **Resolve** - Dependencies resolved, types validated (`Resolver`)
-4. **Generate** - PHP code generated for container class (`PhpGenerator`)
-5. **Runtime** - Compiled container instantiated and used (`Container`)
+1. **Load** — Configuration files loaded and merged (`Config\Loader`).
+2. **Extensions** — `loadConfiguration()` on each extension; `ServicesExtension` registers services from NEON.
+3. **Resolve** — `ContainerBuilder::complete()` resolves types via `Resolver`.
+4. **Generate** — `PhpGenerator::generate()` emits the container class; `ContainerBuilder::exportMeta()` builds the `$wiring`, `$tags`, `$serviceTags`, and **`$byTypeAndTag`** properties (the last one new in this fork — populated in a second pass over the high-priority autowiring slot).
+5. **Runtime** — Compiled container instantiated; `Container::get($type, $tag)` uses the precomputed index for O(1) resolution.
 
 ### Core Components
 
-**`Container.php`** (11KB)
-- Runtime container holding service instances
-- Provides services via `getService()`, `getByType()`, `getByName()`
-- Manages autowiring metadata, tags, aliases
-- Lazy loading and circular dependency detection
-
-**`Compiler.php`** (8.6KB)
-- Orchestrates compilation process
-- Manages compiler extensions
-- Loads and processes configuration
-- Generates container code
-
-**`ContainerBuilder.php`** (9.8KB)
-- Builds service definition graph during compilation
-- Central registry for all service definitions
-- Handles autowiring setup
-- Validates service configurations
-
-**`Resolver.php`** (21KB - largest file)
-- Core dependency resolution logic
-- Resolves `Reference`, `Statement`, and type references
-- Detects circular dependencies
-- Handles complex autowiring scenarios
-
-**`PhpGenerator.php`** (5.6KB)
-- Generates optimized PHP code for container
-- Uses `nette/php-generator` for code emission
-- Creates type-safe service factory methods
-- Produces highly optimized, readable code
+- **`Container.php`** — Runtime. `get($type, ?$tag)`, `getByType()`, `getService()` (`@deprecated`), `findByTypeAndTag()`, `findByTag()`. Holds `$wiring`, `$tags`, `$serviceTags`, `$byTypeAndTag`.
+- **`Compiler.php`** — Orchestrates compilation. Default extensions: `ServicesExtension` + `ParametersExtension` only. `InjectExtension` is opt-in.
+- **`ContainerBuilder.php`** — `addDefinition($name, ?Definition)`, `getByType($type, $throw, ?$tag)`, `exportMeta()` (emits all the runtime metadata, including the new `byTypeAndTag` index).
+- **`Resolver.php`** — `getByType($type, ?$tag)` returns a `Reference` carrying the tag; `normalizeReference()` propagates the tag through type-to-name resolution.
+- **`Autowiring.php`** — `getByType($type, $throw, ?$tag)` filter by `Definition::getTag()`. Default-tag fallback for ambiguity.
+- **`PhpGenerator.php`** — Generates `createService<Name>()` methods. `getMethodName()` maps `.` → `__` in names.
 
 ### Service Definitions (`src/DI/Definitions/`)
 
-Multiple definition types for different service patterns:
+All definition types inherit `Definition::$tag` (the identity tag).
 
-- **`ServiceDefinition`** - Standard service with constructor/setup
-- **`FactoryDefinition`** - Auto-generated factory from interface
-- **`AccessorDefinition`** - Service accessor (getter)
-- **`LocatorDefinition`** - Dynamic service locator
-- **`ImportedDefinition`** - External service reference
-- **`Reference`** - Reference to another service (`@serviceName`)
-- **`Statement`** - Callable/function call (`trim(...)`)
+- **`ServiceDefinition`** — Standard service.
+- **`FactoryDefinition`** — Factory from interface. `applyInjectAttributesToConstructor` is called on its `resultDefinition`.
+- **`AccessorDefinition`** — Lazy getter.
+- **`LocatorDefinition`** — Multi-service locator. Uses upstream's `tagged:` selector against the legacy `$tags` metadata bag, **not** the new identity tag.
+- **`ImportedDefinition`** — External service reference.
+- **`Reference`** — `__construct(string $value, ?string $tag = null)`. `fromType($value, ?$tag)`. `getTag(): ?string`.
+- **`Statement`** — Callable/function call.
 
 ### Configuration System (`src/DI/Config/`)
 
-**`NeonAdapter.php`** - Primary configuration format
-- Processes NEON syntax into service definitions
-- Handles special syntax:
-  - `@serviceName` - service references
-  - `%paramName%` - parameter expansion
-  - `trim(...)` - first-class callable statements
-  - `!` suffix - prevent merging
-- Uses visitor pattern with `NodeTraverser`
-
-**`Loader.php`** - Configuration file loading
-- Merges multiple config files
-- Environment-specific overrides
-- Parameter inheritance
+- **`NeonAdapter.php`** — Processes NEON. Tag-aware reference parsing happens downstream in `Helpers::filterArguments` (regex updated to `^@([\w\\]+)(?:#(\w+))?$`), not in NeonAdapter itself.
+- **`Loader.php`** — File loading and merging.
+- **`Helpers.php` (Config)** — `takeParent()` and `PREVENT_MERGING` constant — kept because `DefinitionSchema` still uses them.
 
 ### Extension System (`src/DI/Extensions/`)
 
-Built-in extensions providing core functionality:
-
-- **`ServicesExtension`** - Registers services from `services:` section
-- **`ParametersExtension`** - Handles container parameters
-- **`SearchExtension`** - Auto-registration by file patterns
-- **`InjectExtension`** - Property/method injection (`#[Inject]`)
-- **`DecoratorExtension`** - Service decoration patterns
-- **`DIExtension`** - DI-specific configuration
-- **`ExtensionsExtension`** - Extension management
-
-Create custom extensions by extending `CompilerExtension`.
+- **`ServicesExtension`** — Reads NEON `services:`, applies the new `tag:` key via `Definition::setTag()`.
+- **`InjectExtension`** — Tag-aware `#[Inject]` handling. Three application sites:
+  - **Constructor parameter:** `applyInjectAttributesToConstructor()` — runs for **all** ServiceDefinitions regardless of `inject: true`. Rewrites the creator's argument map to use tagged References.
+  - **Property:** processed inside `updateDefinition()` — gated by `inject: true` (legacy Nette convention because it adds setup statements).
+  - **Inject method parameter:** `buildInjectMethodStatement()` — also gated by `inject: true`.
+- **`DefinitionSchema`** — Schema for NEON `services:` block. Includes the new `'tag' => Expect::type('string|null')` field on every service kind (service, accessor, factory, locator, imported).
+- **`ParametersExtension`** / **`SearchExtension`** / **`DecoratorExtension`** / **`DIExtension`** / **`ExtensionsExtension`** — unchanged from upstream.
 
 ### Tracy Integration (`src/Bridges/DITracy/`)
 
-Debug panel showing:
-- All registered services with types
-- Service tags and wiring info
-- Container parameters
-- Compilation time
-- Service instantiation status
-
-## Key Design Patterns
-
-1. **Compiled Container Pattern** - Container pre-generated as PHP code, not interpreted at runtime
-2. **Builder Pattern** - `ContainerBuilder` constructs service graph before code generation
-3. **Visitor Pattern** - NEON adapter uses traverser with visitors to process configuration tree
-4. **Extension Point Pattern** - `CompilerExtension` allows pluggable compilation customization
-5. **Lazy Loading** - Services instantiated on-demand, not upfront
-6. **Code Generation** - Runtime container is optimized PHP code with zero interpretation overhead
+`ContainerPanel` displays services, tags, wiring info. Unchanged from upstream; the new `$serviceTags` and `$byTypeAndTag` index aren't exposed yet but the data is there if someone wants to wire it into the panel.
 
 ## NEON Configuration Syntax
 
-The primary configuration format uses special syntax understood by `NeonAdapter`:
+Everything from upstream nette/di works — see [nette/di's docs](https://doc.nette.org/dependency-injection) for the full reference. Fork additions below.
 
-**Service references:**
-```neon
-services:
-	logger: FileLogger
-	mailer:
-		factory: Mailer
-		setup:
-			- setLogger(@logger)  # Reference by name
-			- setConnection(@Nette\Database\Connection)  # Reference by type
-```
-
-**First-class callables (since 3.2.0):**
-```neon
-services:
-	- MyService(trim(...))        # Callable passed as argument
-	- Factory::create(...)         # Factory method callable
-	- UserService(@user::logout(...))  # Equivalent to [@user, 'logout']
-```
-
-**Parameters:**
-```neon
-parameters:
-	logFile: /var/log/app.log
-	mailer:
-		host: smtp.example.com
-		user: admin
-
-services:
-	- FileLogger(%logFile%)           # Parameter expansion
-	- Mailer(%mailer.host%, %mailer.user%)  # Nested parameter access
-```
-
-**Expression language - create objects and call functions:**
-```neon
-services:
-	- DateTime()                       # Create object
-	- Collator::create(%locale%)       # Call static method
-	database: DatabaseFactory::create()
-	router: @routerFactory::create()   # Call method on service
-```
-
-**Method chaining (use `::` instead of `->`):**
-```neon
-parameters:
-	currentDate: DateTime()::format('Y-m-d')
-	# PHP: (new DateTime())->format('Y-m-d')
-
-	host: @http.request::getUrl()::getHost()
-	# PHP: $this->getService('http.request')->getUrl()->getHost()
-```
-
-**Special functions:**
-```neon
-services:
-	- Foo(
-		id: int(::getenv('ProjectId'))        # Lossless type casting
-		productionMode: not(%debugMode%)       # Boolean negation
-		bars: typed(Bar)                       # Array of all Bar services
-		loggers: tagged(logger)                # Array of services with 'logger' tag
-	)
-```
-
-**Constants:**
-```neon
-services:
-	- DirectoryIterator(%tempDir%, FilesystemIterator::SKIP_DOTS)
-	phpVersion: ::constant(PHP_VERSION)
-```
-
-**Prevent merging with `!` suffix:**
-```neon
-services:
-	database!: CustomConnection  # Won't be merged with parent config
-items!:                          # Replace array instead of merging
-	- newItem
-```
-
-## Autowiring Behavior
-
-Autowiring automatically passes services to constructors and methods based on type hints. Understanding its nuances is critical when working with this codebase.
-
-### Basic Autowiring Rules
-
-- **Exactly one service** of each type must exist in the container
-- Multiple services of same type cause autowiring to fail with exception
-- Services can be excluded from autowiring using `autowired: false`
-
-### Disabling Autowiring
+### Tag identity
 
 ```neon
 services:
-	mainDb: PDO(%dsn%, %user%, %password%)
+    cache.fast:
+        factory: App\Cache\RedisCache
+        tag: fast
 
-	tempDb:
-		create: PDO('sqlite::memory:')
-		autowired: false    # Excluded from autowiring
+    cache.slow:
+        factory: App\Cache\FileSystemCache
+        tag: slow
 
-	articles: ArticleRepository  # Gets mainDb injected
+    fallback: App\Cache\NullCache
+    # untagged → implicit tag "default"
 ```
 
-**Important:** In Nette, `autowired: false` means "don't pass this service to others" (different from Symfony where it means "don't autowire constructor args").
-
-### Autowiring Preference
-
-When multiple services of same type exist, mark one as preferred:
+### `@Type#tag` reference syntax
 
 ```neon
 services:
-	mainDb:
-		create: PDO(%dsn%, %user%, %password%)
-		autowired: PDO    # Becomes preferred for PDO type
-
-	tempDb:
-		create: PDO('sqlite::memory:')
-
-	articles: ArticleRepository  # Gets mainDb
+    orderService:
+        factory: OrderService
+        arguments:
+            cache: @\App\Cache\CacheInterface#fast
 ```
 
-### Narrowing Autowiring
+The leading `\` is the standard convention separating type-refs from name-refs. Without it, `@CacheInterface#fast` parses as the *name* `CacheInterface` (with tag `fast`). NEON natively accepts the `#tag` suffix unquoted.
 
-Limit which types a service can be autowired for:
+## Autowiring Behavior (delta from upstream)
+
+Standard upstream rules apply (exactly-one-of-type required for autowiring, `autowired: false` to exclude, narrowing via `autowired: SomeType`, etc.). The fork adds:
+
+- Each service has an **identity tag** alongside its type. The default tag is `"default"` if unset.
+- `Container::get($type, $tag)` and `getByType($type, $throw, $tag)` filter candidates by `(type, tag)`. With `$tag === null`, multi-candidate ambiguity is broken by preferring `"default"`-tagged services.
+- Polymorphic resolution works because the index registers each service under all its parent classes and interfaces.
+
+Example:
 
 ```neon
 services:
-	parent: ParentClass
-	child:
-		create: ChildClass
-		autowired: ChildClass    # Only autowired for ChildClass type, not ParentClass
-		# Can also use 'self' as alias for current class
+    redis:
+        factory: RedisCache
+        tag: doctrine
 
-	parentDep: ParentDependent   # Gets parent service
-	childDep: ChildDependent     # Gets child service
+    fs:
+        factory: FileSystemCache
+        # untagged → "default"
 ```
-
-Multiple types can be specified:
-
-```neon
-autowired: [BarClass, FooInterface]
-```
-
-**How narrowing works:** Service is only autowired when the required type matches or is a subtype of the narrowed type.
-
-### Collection of Services
-
-Autowiring can pass arrays of services:
 
 ```php
-class ShipManager
-{
-	/**
-	 * @param Shipper[] $shippers
-	 */
-	public function __construct(array $shippers)
-	{}
-}
+$container->get(CacheInterface::class);              // → FileSystemCache (untagged default)
+$container->get(CacheInterface::class, 'doctrine');  // → RedisCache
+$container->get(RedisCache::class, 'doctrine');      // → same RedisCache instance (polymorphic)
+$container->get(CacheInterface::class, 'missing');   // throws MissingServiceException
 ```
 
-The container automatically passes all `Shipper` services (excluding those with `autowired: false`).
+## Extension Development
 
-Alternative using `typed()` function:
+Same lifecycle as upstream (`getConfigSchema()`, `loadConfiguration()`, `beforeCompile()`, `afterCompile()`, `$initialization`). The key extension-author thing to know about this fork:
 
-```neon
-services:
-	- ShipManager(typed(Shipper))
-```
-
-### Scalar Arguments
-
-Autowiring only works for objects and arrays of objects. Scalar values (strings, numbers, booleans) must be specified in configuration or wrapped in a settings object.
-
-
-## Service Definition Patterns
-
-### Service Creation Methods
-
-**Simple class instantiation:**
-```neon
-services:
-	database: PDO('sqlite::memory:')
-```
-
-**Multi-line with additional configuration:**
-```neon
-services:
-	database:
-		create: PDO('sqlite::memory:')    # or 'factory:' (both work)
-		setup: ...
-		tags: ...
-```
-
-**Static method factories:**
-```neon
-services:
-	database: DatabaseFactory::create()
-	router: @routerFactory::create()    # Call method on another service
-```
-
-**With explicit type (when return type not declared):**
-```neon
-services:
-	database:
-		create: DatabaseFactory::create()
-		type: PDO
-```
-
-### Arguments
-
-**Named arguments (preferred for clarity):**
-```neon
-services:
-	database: PDO(
-		username: root
-		password: secret
-		dsn: 'mysql:host=127.0.0.1;dbname=test'
-	)
-```
-
-**Omit arguments to use defaults or autowiring:**
-```neon
-services:
-	foo: Foo(_, %appDir%)    # First arg autowired, second is parameter
-```
-
-### Setup Section
-
-Call methods after service creation:
-
-```neon
-services:
-	database:
-		create: PDO(%dsn%, %user%, %password%)
-		setup:
-			- setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION)
-			- $value = 123                    # Set property
-			- '$onClick[]' = [@bar, clickHandler]  # Add to array
-			- My\Helpers::initializeFoo(@self)     # Pass service to static method
-			- @anotherService::setFoo(@self)       # Call method on other service
-```
-
-### Lazy Services (PHP 8.4+)
-
-Enable globally or per-service:
-
-```neon
-di:
-	lazy: true    # Global setting
-
-services:
-	foo:
-		create: Foo
-		lazy: false    # Override for specific service
-```
-
-Lazy services return proxy objects; actual instantiation happens on first method/property access. Only works for user-defined classes.
-
-### Tags
-
-Organize and query services by tags:
-
-```neon
-services:
-	foo:
-		create: Foo
-		tags:
-			- cached
-			logger: monolog.logger.event    # Tag with value
-```
-
-Retrieve tagged services:
-
-```php
-$names = $container->findByTag('logger');
-// ['foo' => 'monolog.logger.event', ...]
-```
-
-Or in configuration:
-
-```neon
-services:
-	- LoggersDependent(tagged(logger))
-```
-
-### Service Modifications
-
-Modify services registered by extensions:
-
-```neon
-services:
-	application.application:
-		create: MyApplication
-		alteration: true    # Indicates we're modifying existing service
-		setup:
-			- '$onStartup[]' = [@resource, init]
-```
-
-Remove original configuration:
-
-```neon
-services:
-	application.application:
-		alteration: true
-		reset:
-			- arguments
-			- setup
-			- tags
-```
-
-Remove service entirely:
-
-```neon
-services:
-	cache.journal: false
-```
-
-
-## Configuration Sections
-
-### Decorator
-
-Apply setup to all services of a specific type:
-
-```neon
-decorator:
-	App\Presentation\BasePresenter:
-		setup:
-			- setProjectId(10)
-			- $absoluteUrls = true
-
-	InjectableInterface:
-		tags: [mytag: 1]
-		inject: true
-```
-
-Useful for:
-- Calling methods on all presenters
-- Setting tags on interfaces
-- Enabling inject mode for specific types
-
-### Search (Auto-registration)
-
-Automatically register services by file/class patterns:
-
-```neon
-search:
-	-	in: %appDir%/Forms
-		files:
-			- *Factory.php
-		classes:
-			- *Factory
-
-	-	in: %appDir%/Model
-		extends:
-			- App\*Form
-		implements:
-			- App\*FormInterface
-		exclude:
-			files: ...
-			classes: ...
-		tags: [autoregistered]
-```
-
-**Filtering options:**
-- `files:` - Filter by filename pattern
-- `classes:` - Filter by class name pattern
-- `extends:` - Select classes extending specified classes
-- `implements:` - Select classes implementing interfaces
-- `exclude:` - Exclusion rules (same keys as above)
-- `tags:` - Tags to assign to all registered services
-
-### DI Section
-
-Technical container configuration:
-
-```neon
-di:
-	debugger: true              # Show DIC in Tracy Bar
-	excluded: [...]             # Parameter types never autowired
-	lazy: false                 # Enable lazy services globally (PHP 8.4+)
-	parentClass: ...            # Base class for DI container
-
-	export:
-		parameters: false       # Don't export parameters to metadata
-		tags:                   # Export only specific tags
-			- event.subscriber
-		types:                  # Export only specific types for autowiring
-			- Nette\Database\Connection
-```
-
-**Metadata optimization:** Reduce generated container size by limiting exported metadata to only what's actually used.
-
-### Including Files
-
-```neon
-includes:
-	- parameters.php    # Can include PHP files returning arrays
-	- services.neon
-	- presenters.neon
-```
-
-**Merging behavior:**
-- Later files override earlier ones
-- Arrays are merged (unless `!` suffix used)
-- File containing `includes` has higher priority than included files
-
-
-## Extension Development Lifecycle
-
-Extensions customize the compilation process by implementing up to 4 methods called sequentially:
-
-### 1. getConfigSchema()
-
-Define and validate extension configuration:
-
-```php
-class BlogExtension extends Nette\DI\CompilerExtension
-{
-	public function getConfigSchema(): Nette\Schema\Schema
-	{
-		return Expect::structure([
-			'postsPerPage' => Expect::int(),
-			'allowComments' => Expect::bool()->default(true),
-		]);
-	}
-}
-```
-
-Access config via `$this->config` (stdClass object).
-
-### 2. loadConfiguration()
-
-Register services to container:
-
-```php
-public function loadConfiguration()
-{
-	$builder = $this->getContainerBuilder();
-	$builder->addDefinition($this->prefix('articles'))
-		->setFactory(App\Model\HomepageArticles::class, ['@connection'])
-		->addSetup('setLogger', ['@logger']);
-}
-```
-
-**Important:** Use `$this->prefix('name')` to avoid service name conflicts.
-
-**Loading from NEON:**
-
-```php
-public function loadConfiguration()
-{
-	$this->compiler->loadDefinitionsFromConfig(
-		$this->loadFromFile(__DIR__ . '/blog.neon')['services'],
-	);
-}
-```
-
-In NEON file, use `@extension` to reference current extension's services.
-
-### 3. beforeCompile()
-
-Modify existing services or establish relationships:
-
-```php
-public function beforeCompile()
-{
-	$builder = $this->getContainerBuilder();
-
-	foreach ($builder->findByTag('logaware') as $serviceName => $tagValue) {
-		$builder->getDefinition($serviceName)->addSetup('setLogger');
-	}
-}
-```
-
-Called after all `loadConfiguration()` methods complete. Service graph is fully defined.
-
-### 4. afterCompile()
-
-Modify generated container class:
-
-```php
-public function afterCompile(Nette\PhpGenerator\ClassType $class)
-{
-	$method = $class->getMethod('__construct');
-	// Modify generated PHP code
-}
-```
-
-Container class already generated as `ClassType` object. Can modify before writing to cache.
-
-### $initialization
-
-Add code to run after container instantiation:
-
-```php
-public function loadConfiguration()
-{
-	// Auto-start session
-	if ($this->config->session->autoStart) {
-		$this->initialization->addBody('$this->getService("session")->start()');
-	}
-
-	// Instantiate services tagged with 'run'
-	foreach ($this->getContainerBuilder()->findByTag('run') as $name => $foo) {
-		$this->initialization->addBody('$this->getService(?);', [$name]);
-	}
-}
-```
-
-
-## Generated Factories and Accessors
-
-Nette DI can generate factory and accessor implementations from interfaces.
-
-### Generated Factories
-
-**Define interface:**
-
-```php
-interface ArticleFactory
-{
-	function create(): Article;
-}
-```
-
-**Register in config:**
-
-```neon
-services:
-	- ArticleFactory
-```
-
-Nette generates the implementation. Dependencies autowired into `Article` constructor.
-
-**Parameterized factories:**
-
-```php
-interface ArticleFactory
-{
-	function create(int $authorId): Article;
-}
-
-class Article
-{
-	public function __construct(
-		private Nette\Database\Connection $db,
-		private int $authorId,    // Matched by name from factory method
-	) {}
-}
-```
-
-**Advanced configuration:**
-
-```neon
-services:
-	articleFactory:
-		implement: ArticleFactory
-		arguments:
-			authorId: 123    # Fixed value passed to constructor
-		setup:
-			- setAuthorId($authorId)    # Or via setter
-```
-
-### Accessors
-
-Provide lazy-loading for dependencies:
-
-```php
-interface PDOAccessor
-{
-	function get(): PDO;
-}
-```
-
-```neon
-services:
-	- PDOAccessor
-	- PDO(%dsn%, %user%, %password%)
-```
-
-Accessor returns same instance on repeated calls. Database connection only created on first `get()` call.
-
-If multiple services of same type exist, specify which one: `- PDOAccessor(@db1)`
-
-### Multifactory/Accessor
-
-Combine multiple factories and accessors in one interface:
-
-```php
-interface MultiFactory
-{
-	function createArticle(): Article;
-	function getDb(): PDO;
-}
-```
-
-**Definition with list (3.2.0+):**
-
-```neon
-services:
-	- MultiFactory(
-		article: Article
-		db: PDO(%dsn%, %user%, %password%)
-	)
-```
-
-**Or with references:**
-
-```neon
-services:
-	article: Article
-	- PDO(%dsn%, %user%, %password%)
-	- MultiFactory(
-		article: @article
-		db: @\PDO
-	)
-```
-
-
-## Development Workflow
-
-### Adding New Features
-
-When adding features to the DI container:
-
-1. **Determine scope** - Does it need new definition type, compiler extension, or core change?
-2. **Update definitions** - Add to `ContainerBuilder` if new service type
-3. **Implement resolution** - Update `Resolver` if special dependency handling needed
-4. **Generate code** - Modify `PhpGenerator` to emit correct PHP code
-5. **Add tests** - Create `.phpt` test files demonstrating usage
-6. **Update docs** - Changes to configuration syntax need documentation
-
-### Debugging Tips
-
-**Inspect generated container:**
-- Generated code is cached in temp directory
-- Use `ContainerLoader` with `autoRebuild: true` during development
-- Check `tests/tmp/{pid}/code.php` during test runs
-
-**Use Tracy panel:**
-- Shows all registered services and their state
-- Reveals autowiring metadata
-- Displays compilation time
-
-**Test helpers:**
-- `Notes::add()` for debug messages in tests
-- Examine `tests/DI/expected/` for expected code output
-- Use `Tester\FileMock::create()` for inline NEON configs
-
-### Common Gotchas
-
-- **Strict types required** - All files must have `declare(strict_types=1)`
-- **NEON syntax sensitivity** - Indentation matters, references need `@` prefix
-- **Circular dependencies** - Resolver detects but requires careful definition ordering
-- **Generated code cache** - Use `autoRebuild: true` to avoid stale container during development
-- **Test isolation** - Each test gets unique container class name via counter
-
-## Code Style
-
-Follows Nette Coding Standard (based on PSR-12):
-
-- Strict types declaration in all files
-- PascalCase for classes, camelCase for methods/properties
-- Type hints for all parameters, properties, return values
-- Two empty lines between methods (per Nette convention)
-- Exceptions grouped in `exceptions.php` files
-- Natural language exception messages (e.g., "The file does not exist.")
+- If your extension cares about identity tags, read them via `$def->getTag()` (returns `string`, `"default"` if unset).
+- To filter the container builder's services by identity tag, walk `$builder->getDefinitions()` and check `$def->getTag()`. There is no `findByIdentityTag()` helper at the builder level — only at the runtime `Container::findByTypeAndTag()`.
+- The legacy `tags:` metadata bag (multi-key, with values) is unchanged. `Definition::getTagValue($name)` (renamed from `getTag()`) gives single-key access; `getTags()` returns the whole bag.
 
 ## Important Files
 
-**Entry points for understanding:**
-- `readme.md` - Excellent overview with working examples
-- `src/DI/Container.php` - Runtime behavior
-- `src/DI/Compiler.php` - Compilation orchestration
-- `src/DI/Resolver.php` - Dependency resolution logic
-- `tests/DI/*.phpt` - Real usage patterns
+- `readme.md` — fork-focused overview, what's added on top of nette/di.
+- `src/DI/Container.php` — runtime; the `get()` / `getByType()` / `findByTypeAndTag()` API.
+- `src/DI/Autowiring.php` — `getByType($type, $throw, $tag)` resolution rules.
+- `src/DI/Extensions/InjectExtension.php` — `#[Inject(tag:)]` handling at all three sites (ctor, property, inject method).
+- `src/DI/ContainerBuilder.php::exportMeta()` — where the runtime metadata (including `$byTypeAndTag`) gets baked.
+- `tests/DI/Autowiring.tag.phpt`, `InjectExtension.tags.phpt`, `Container.findByTypeAndTag.phpt`, `NeonAdapter.tagRef.phpt` — the new tag-feature tests.
 
-**Configuration examples:**
-- `tests/DI/files/*.neon` - Test fixtures showing NEON syntax
-- `tests/DI/expected/*.php` - Expected generated container code
+## Code Style
+
+Follows Nette Coding Standard — strict types in every file, PascalCase classes, camelCase methods/properties, two empty lines between methods, exceptions in `exceptions.php`, natural-language exception messages.
+
+## Common Gotchas
+
+- **`InjectExtension` is not auto-registered.** Tests using `#[Inject]` must `$compiler->addExtension('inject', new InjectExtension)` explicitly.
+- **NEON `@Type#tag` requires leading `\`** for type-refs — `@CacheInterface#fast` is a *name* reference; `@\CacheInterface#fast` is a *type* reference.
+- **`Definition::getTag()` has two overlapping meanings.** The no-arg version `getTag(): string` returns the **identity tag** (new). The one-arg version `getTagValue(string $name): mixed` (renamed from `getTag(string $name)` in this fork) returns a **metadata value** from the legacy `tags` bag. If you see old code calling `$def->getTag('something')`, it needs migration to `getTagValue('something')`.
+- **Bare `#[Inject]` on a ctor/inject-method param throws.** Untagged params are autowired by native type already; bare `#[Inject]` there has no meaning and is rejected at compile time. Use `#[Inject(tag: '…')]` or remove the attribute.
+- **`Compiler::getConfig()` carries an `@deprecated` upstream tag** but is still used by 9 tests for config introspection. Don't aggressively remove or you'll break a lot of tests for no gain.
+- **`#[\Deprecated]` attribute is not used** for the deprecation markers in this fork — it would trigger `E_USER_DEPRECATED` at runtime on PHP 8.4, including from our own internal callers. Only `@deprecated` docblock comments are used.
