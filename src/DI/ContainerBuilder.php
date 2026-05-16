@@ -56,7 +56,7 @@ class ContainerBuilder
 	 * @param  TDef|null  $definition
 	 * @return ($definition is null ? Definitions\ServiceDefinition : TDef)
 	 */
-	public function addDefinition(?string $name, ?Definition $definition = null): Definition
+	public function addDefinition(?string $name = null, ?Definition $definition = null): Definition
 	{
 		$this->needsResolve = true;
 		if ($name === null) {
@@ -97,25 +97,25 @@ class ContainerBuilder
 	}
 
 
-	public function addAccessorDefinition(?string $name): Definitions\AccessorDefinition
+	public function addAccessorDefinition(?string $name = null): Definitions\AccessorDefinition
 	{
 		return $this->addDefinition($name, new Definitions\AccessorDefinition);
 	}
 
 
-	public function addFactoryDefinition(?string $name): Definitions\FactoryDefinition
+	public function addFactoryDefinition(?string $name = null): Definitions\FactoryDefinition
 	{
 		return $this->addDefinition($name, new Definitions\FactoryDefinition);
 	}
 
 
-	public function addLocatorDefinition(?string $name): Definitions\LocatorDefinition
+	public function addLocatorDefinition(?string $name = null): Definitions\LocatorDefinition
 	{
 		return $this->addDefinition($name, new Definitions\LocatorDefinition);
 	}
 
 
-	public function addImportedDefinition(?string $name): Definitions\ImportedDefinition
+	public function addImportedDefinition(?string $name = null): Definitions\ImportedDefinition
 	{
 		return $this->addDefinition($name, new Definitions\ImportedDefinition);
 	}
@@ -214,16 +214,16 @@ class ContainerBuilder
 
 
 	/**
-	 * Resolves autowired service name by type.
+	 * Resolves autowired service name by type (and optionally by identity tag).
 	 * @param  class-string  $type
 	 * @return ($throw is true ? string : ?string)
 	 * @throws MissingServiceException
 	 * @throws NotAllowedDuringResolvingException
 	 */
-	public function getByType(string $type, bool $throw = false): ?string
+	public function getByType(string $type, bool $throw = false, ?string $tag = null): ?string
 	{
 		$this->needResolved();
-		return $this->autowiring->getByType($type, $throw);
+		return $this->autowiring->getByType($type, $throw, $tag);
 	}
 
 
@@ -364,7 +364,7 @@ class ContainerBuilder
 
 
 	/**
-	 * @return array{tags?: array<string, array<string, mixed>>, aliases: array<string, string>, wiring: array<class-string, array<int, list<string>>>}
+	 * @return array{tags?: array<string, array<string, mixed>>, serviceTags?: array<string, string>, byTypeAndTag?: array<class-string, array<string, list<string>>>, aliases: array<string, string>, wiring: array<class-string, array<int, list<string>>>}
 	 * @internal
 	 */
 	public function exportMeta(): array
@@ -374,6 +374,10 @@ class ContainerBuilder
 		foreach ($defs as $name => $def) {
 			foreach ($def->getTags() as $tag => $value) {
 				$meta['tags'][$tag][$name] = $value;
+			}
+
+			if ($def->getTag() !== Definitions\Definition::DefaultTag) {
+				$meta['serviceTags'][$name] = $def->getTag();
 			}
 		}
 
@@ -396,6 +400,16 @@ class ContainerBuilder
 				$low[$class] ?? [],
 				array_diff($names, $low[$class] ?? [], $high[$class] ?? []),
 			]);
+		}
+
+		// Precomputed (type, tag) → list<name> index, restricted to autowired services
+		// (services in the high-priority wiring slot). Powers Container::get() / getByType()
+		// O(1) fast path.
+		foreach ($meta['wiring'] ?? [] as $class => $slots) {
+			foreach ($slots[0] ?? [] as $name) {
+				$identityTag = $this->definitions[$name]->getTag();
+				$meta['byTypeAndTag'][$class][$identityTag][] = $name;
+			}
 		}
 
 		return $meta;

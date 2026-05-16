@@ -8,7 +8,8 @@
 namespace Nette\DI;
 
 use Nette;
-use function array_flip, array_key_exists, array_keys, array_map, array_merge, array_values, class_exists, count, get_class_methods, implode, interface_exists, is_a, is_object, natsort, sprintf, str_replace, ucfirst;
+use Nette\DI\Definitions\Definition;
+use function array_filter, array_flip, array_key_exists, array_keys, array_map, array_merge, array_search, array_values, class_exists, count, get_class_methods, implode, interface_exists, is_a, is_object, natsort, sprintf, str_replace, ucfirst;
 
 
 /**
@@ -27,6 +28,23 @@ class Container
 
 	/** @var array<string, array<string, mixed>>  tag name => (service name => tag value) */
 	protected array $tags = [];
+
+	/**
+	 * Identity tag of each non-default-tagged service. Untagged services
+	 * are omitted; their tag is implicitly Definition::DefaultTag.
+	 * @var array<string, string>  service name => identity tag
+	 */
+	protected array $serviceTags = [];
+
+	/**
+	 * Precomputed O(1) lookup index for get($type, $tag). For each registered
+	 * type (incl. parent classes and interfaces), maps each identity tag to
+	 * the list of service names matching (type, tag). Most lists have one
+	 * entry; multi-entry lists indicate multiple concrete implementations
+	 * share an interface and tag — that's only an error at lookup time.
+	 * @var array<class-string, array<string, list<string>>>
+	 */
+	protected array $byTypeAndTag = [];
 
 	/** @var array<class-string, array<int, list<string>>>  type => (high/low/no => service names) */
 	protected array $wiring = [];
@@ -136,6 +154,13 @@ class Container
 
 	/**
 	 * Returns the service instance. If it has not been created yet, it creates it.
+	 *
+	 * Name-based lookup. Prefer Container::get($type, $tag) for tag-aware resolution —
+	 * it goes through an O(1) precomputed (type, tag) → name index. This method stays
+	 * available for back-compat with code that registered services by explicit name
+	 * (e.g. NEON `services: { foo: ... }`).
+	 *
+	 * @deprecated use Container::get($type, $tag) — name-based lookup is being phased out
 	 * @throws MissingServiceException
 	 */
 	public function getService(string $name): object
@@ -238,26 +263,121 @@ class Container
 
 
 	/**
-	 * Returns an instance of the autowired service of the given type. If it has not been created yet, it creates it.
+	 * Resolves an autowired service by (type, identity tag). The canonical tag-aware lookup.
+	 * Untagged services are considered tagged with Definitions\Definition::DefaultTag.
+	 * Always throws on miss or ambiguity — use getOrNull() if you want a nullable miss.
+	 *
+	 * O(1) via the precompiled $byTypeAndTag index, then one O(1) hash lookup in $methods
+	 * inside getService().
+	 *
+	 * @template T of object
+	 * @param  class-string<T>  $type
+	 * @return T
+	 * @throws MissingServiceException
+	 */
+	public function get(string $type, ?string $tag = null): object
+	{
+		$lookupTag = $tag ?? Definition::DefaultTag;
+
+		// Fast path: try the type as-given. Most callers pass canonical class names
+		// via ::class so we avoid the ReflectionClass allocation in normalizeClass()
+		// for the common case.
+		if (isset($this->byTypeAndTag[$type][$lookupTag])) {
+			$names = $this->byTypeAndTag[$type][$lookupTag];
+			if (count($names) === 1) {
+				return $this->getService($names[0]);
+			}
+		}
+
+		// Slow path: normalize (handles case-folding / leading backslash) and full lookup.
+		return $this->getByType($type, throw: true, tag: $tag);
+	}
+
+
+	/**
+	 * Resolves an autowired service by (type, identity tag), returning null on miss
+	 * instead of throwing. Ambiguity (multiple services matching) still throws —
+	 * that's a programming error, not a "does this exist?" question.
+	 *
+	 * Shares the same O(1) fast path as get().
+	 *
+	 * @template T of object
+	 * @param  class-string<T>  $type
+	 * @return T|null
+	 * @throws MissingServiceException on ambiguity
+	 */
+	public function getOrNull(string $type, ?string $tag = null): ?object
+	{
+		$lookupTag = $tag ?? Definition::DefaultTag;
+
+		if (isset($this->byTypeAndTag[$type][$lookupTag])) {
+			$names = $this->byTypeAndTag[$type][$lookupTag];
+			if (count($names) === 1) {
+				return $this->getService($names[0]);
+			}
+		}
+
+		return $this->getByType($type, throw: false, tag: $tag);
+	}
+
+
+	/**
+	 * Returns an instance of the autowired service of the given type and optional identity tag.
+	 * If it has not been created yet, it creates it.
 	 * @template T of object
 	 * @param  class-string<T>  $type
 	 * @return ($throw is true ? T : ?T)
 	 * @throws MissingServiceException
 	 */
-	public function getByType(string $type, bool $throw = true): ?object
+	public function getByType(string $type, bool $throw = true, ?string $tag = null): ?object
 	{
 		$type = Helpers::normalizeClass($type);
+
+		// Fast path: precomputed index. Handles the overwhelming majority of resolutions.
+		$lookupTag = $tag ?? Definition::DefaultTag;
+		$names = $this->byTypeAndTag[$type][$lookupTag] ?? null;
+		if ($names !== null && count($names) === 1) {
+			return $this->getService($names[0]);
+		}
+
+		// Slow path: ambiguous match, missing, or implicit-default fallback.
 		if (!empty($this->wiring[$type][0])) {
-			if (count($names = $this->wiring[$type][0]) === 1) {
+			$names = $this->wiring[$type][0];
+
+			if ($tag !== null) {
+				$names = array_values(array_filter($names, fn(string $name): bool => ($this->serviceTags[$name] ?? Definition::DefaultTag) === $tag));
+				if ($names === []) {
+					if ($throw) {
+						throw new MissingServiceException(sprintf("Service of type %s with tag '%s' not found.", $type, $tag));
+					}
+
+					return null;
+				}
+			} elseif (count($names) > 1) {
+				// Multiple type-matches with no explicit tag: prefer the "default"-tagged subset.
+				$defaults = array_values(array_filter($names, fn(string $name): bool => ($this->serviceTags[$name] ?? Definition::DefaultTag) === Definition::DefaultTag));
+				if (count($defaults) === 1) {
+					return $this->getService($defaults[0]);
+				}
+			}
+
+			if (count($names) === 1) {
 				return $this->getService($names[0]);
 			}
 
 			natsort($names);
-			throw new MissingServiceException(sprintf("Multiple services of type $type found: %s.", implode(', ', $names)));
+			throw new MissingServiceException(sprintf(
+				'Multiple services of type %s%s found: %s.',
+				$type,
+				$tag !== null ? sprintf(" with tag '%s'", $tag) : '',
+				implode(', ', $names),
+			));
 
 		} elseif ($throw) {
 			if (!class_exists($type) && !interface_exists($type)) {
 				throw new MissingServiceException(sprintf("Service of type '%s' not found. Check the class name because it cannot be found.", $type));
+			} elseif ($tag !== null) {
+				throw new MissingServiceException(sprintf("Service of type %s with tag '%s' not found.", $type, $tag));
 			} elseif ($this->findByType($type)) {
 				throw new MissingServiceException(sprintf("Service of type %s is not autowired or is missing in di\u{a0}›\u{a0}export\u{a0}›\u{a0}types.", $type));
 			} else {
@@ -302,6 +422,25 @@ class Container
 	public function findByTag(string $tag): array
 	{
 		return $this->tags[$tag] ?? [];
+	}
+
+
+	/**
+	 * Returns service names matching (type, tag) from the precomputed index. With $tag null,
+	 * returns the full tag → names map for the type. Used internally by Container::get() and
+	 * the planned bag-of-services autowiring (array<string, T> ctor params keyed by tag).
+	 *
+	 * @param  class-string  $type
+	 * @return ($tag is null ? array<string, list<string>> : list<string>)
+	 */
+	public function findByTypeAndTag(string $type, ?string $tag = null): array
+	{
+		$type = Helpers::normalizeClass($type);
+		if ($tag === null) {
+			return $this->byTypeAndTag[$type] ?? [];
+		}
+
+		return $this->byTypeAndTag[$type][$tag] ?? [];
 	}
 
 

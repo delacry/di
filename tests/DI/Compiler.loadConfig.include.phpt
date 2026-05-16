@@ -44,6 +44,7 @@ Assert::equal([
 			'setup' => [],
 			'inject' => null,
 			'autowired' => false,
+			'tag' => null,
 			'tags' => [],
 			'reset' => [],
 			'alteration' => null,

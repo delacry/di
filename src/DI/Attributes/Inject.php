@@ -10,7 +10,18 @@ namespace Nette\DI\Attributes;
 use Attribute;
 
 
-#[Attribute(Attribute::TARGET_PROPERTY)]
+/**
+ * Marks a property, constructor parameter, or `inject*` method parameter for tag-aware
+ * dependency injection. On constructor and method parameters the attribute is only
+ * meaningful when $tag is set — untagged parameters are autowired via their native type
+ * already. On properties the attribute is also the marker that enables setter-style
+ * injection on that property.
+ */
+#[Attribute(Attribute::TARGET_PROPERTY | Attribute::TARGET_PARAMETER)]
 class Inject
 {
+	public function __construct(
+		public readonly ?string $tag = null,
+	) {
+	}
 }

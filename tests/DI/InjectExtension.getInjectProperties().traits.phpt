@@ -41,6 +41,6 @@ namespace {
 
 
 	Assert::same([
-		'varA' => A\AInjected::class,
+		'varA' => ['type' => A\AInjected::class, 'tag' => null],
 	], InjectExtension::getInjectProperties(C\CClass::class));
 }

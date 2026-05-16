@@ -7,7 +7,8 @@
 
 namespace Nette\DI;
 
-use function array_merge, class_exists, class_implements, class_parents, count, implode, interface_exists, is_a, is_array, natsort, sprintf, str_contains;
+use Nette\DI\Definitions\Definition;
+use function array_filter, array_merge, array_values, class_exists, class_implements, class_parents, count, implode, interface_exists, is_a, is_array, natsort, sprintf, str_contains;
 
 
 /**
@@ -32,17 +33,22 @@ class Autowiring
 
 
 	/**
-	 * Resolves service name by type.
+	 * Resolves a service name by (type, tag). When $tag is null, untagged services
+	 * (i.e. those whose identity tag is the implicit "default") are preferred to break
+	 * ambiguity. When $tag is non-null, only services with a matching identity tag are
+	 * considered.
+	 *
 	 * @param class-string  $type
 	 * @return ($throw is true ? string : ?string)
 	 * @throws MissingServiceException when not found
-	 * @throws ServiceCreationException when multiple found
+	 * @throws ServiceCreationException when multiple match
 	 */
-	public function getByType(string $type, bool $throw = false): ?string
+	public function getByType(string $type, bool $throw = false, ?string $tag = null): ?string
 	{
 		$type = Helpers::normalizeClass($type);
-		$types = $this->highPriority;
-		if (empty($types[$type])) {
+		$candidates = $this->highPriority[$type] ?? [];
+
+		if ($candidates === []) {
 			if ($throw) {
 				if (!class_exists($type) && !interface_exists($type)) {
 					throw new MissingServiceException(sprintf("Service of type '%s' not found. Check the class name because it cannot be found.", $type));
@@ -52,22 +58,45 @@ class Autowiring
 			}
 
 			return null;
-
-		} elseif (count($types[$type]) === 1) {
-			return $types[$type][0];
-
-		} else {
-			$list = $types[$type];
-			natsort($list);
-			$hint = count($list) === 2 && ($tmp = str_contains($list[0], '.') xor str_contains($list[1], '.'))
-				? '. If you want to overwrite service ' . $list[$tmp ? 0 : 1] . ', give it proper name.'
-				: '';
-			throw new ServiceCreationException(sprintf(
-				"Multiple services of type $type found: %s%s",
-				implode(', ', $list),
-				$hint,
-			));
 		}
+
+		$definitions = $this->builder->getDefinitions();
+
+		if ($tag !== null) {
+			$candidates = array_values(array_filter($candidates, static fn(string $name): bool => $definitions[$name]->getTag() === $tag));
+			if ($candidates === []) {
+				if ($throw) {
+					throw new MissingServiceException(sprintf("Service of type %s with tag '%s' not found.", $type, $tag));
+				}
+
+				return null;
+			}
+		}
+
+		if (count($candidates) === 1) {
+			return $candidates[0];
+		}
+
+		// $tag === null and multiple candidates — try to disambiguate by preferring "default"-tagged services
+		if ($tag === null) {
+			$defaults = array_values(array_filter($candidates, static fn(string $name): bool => $definitions[$name]->getTag() === Definition::DefaultTag));
+			if (count($defaults) === 1) {
+				return $defaults[0];
+			}
+		}
+
+		natsort($candidates);
+		$list = array_values($candidates);
+		$hint = count($list) === 2 && ($tmp = str_contains($list[0], '.') xor str_contains($list[1], '.'))
+			? '. If you want to overwrite service ' . $list[$tmp ? 0 : 1] . ', give it proper name.'
+			: '';
+		throw new ServiceCreationException(sprintf(
+			'Multiple services of type %s%s found: %s%s',
+			$type,
+			$tag !== null ? sprintf(" with tag '%s'", $tag) : '',
+			implode(', ', $list),
+			$hint,
+		));
 	}
 
 

@@ -24,6 +24,17 @@ abstract class Definition
 	/** @var array<string, mixed> */
 	private array $tags = [];
 
+	/**
+	 * Identity tag — a single string discriminator used together with the service type
+	 * to identify this service for autowiring and Container::get($type, $tag) lookups.
+	 * Null means the implicit Definition::DefaultTag.
+	 *
+	 * Readable publicly, writable only via setTag() so subclasses and external callers
+	 * go through the validated path. For the "always a string" view that falls back to
+	 * DefaultTag when null, use getTag() instead.
+	 */
+	public private(set) ?string $tag = null;
+
 	/** @var bool|class-string[] */
 	private bool|array $autowired = true;
 
@@ -103,10 +114,36 @@ abstract class Definition
 	}
 
 
-	final public function getTag(string $tag): mixed
+	/**
+	 * With no argument: returns the identity tag (a single string; defaults to
+	 * Definition::DefaultTag when not explicitly set), used by tag-aware autowiring
+	 * and Container::get($type, $tag) lookups.
+	 *
+	 * With a tag name: returns the per-tag metadata value from the legacy multi-tag
+	 * bag (or null if not set).
+	 *
+	 * @return ($name is null ? string : mixed)
+	 */
+	final public function getTag(?string $name = null): mixed
 	{
-		return $this->tags[$tag] ?? null;
+		return $name === null
+			? ($this->tag ?? self::DefaultTag)
+			: ($this->tags[$name] ?? null);
 	}
+
+
+	/**
+	 * Sets the identity tag used by tag-aware autowiring (Container::get($type, $tag)).
+	 * Pass null to fall back to the implicit "default" tag.
+	 */
+	final public function setTag(?string $tag): static
+	{
+		$this->tag = $tag;
+		return $this;
+	}
+
+
+	public const DefaultTag = 'default';
 
 
 	/**
@@ -170,18 +207,8 @@ abstract class Definition
 	}
 
 
-	/********************* deprecated stuff from former ServiceDefinition ****************d*g**/
-
-
-	/** @deprecated */
-	public function generateMethod(Nette\PhpGenerator\Method $method, Nette\DI\PhpGenerator $generator): void
-	{
-		$method->setBody($this->generateCode($generator));
-	}
-
-
 	/**
-	 * @deprecated Use setType()
+	 * @deprecated Use setType() — kept for vendor compatibility (e.g. tracy/tracy bridge).
 	 * @param class-string|null $type
 	 * @return static
 	 */
@@ -192,21 +219,11 @@ abstract class Definition
 
 
 	/**
-	 * @deprecated Use getType()
+	 * @deprecated Use getType() — kept for vendor compatibility.
 	 * @return class-string|null
 	 */
 	public function getClass(): ?string
 	{
 		return $this->getType();
-	}
-
-
-	/**
-	 * @deprecated Use getAutowired()
-	 * @return bool|class-string[]
-	 */
-	public function isAutowired()
-	{
-		return $this->autowired;
 	}
 }

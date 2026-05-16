@@ -171,6 +171,7 @@ class DefinitionSchema implements Schema
 			'setup' => Expect::listOf('callable|Nette\DI\Definitions\Statement|array:1'),
 			'inject' => Expect::bool(),
 			'autowired' => Expect::type('bool|string|array'),
+			'tag' => Expect::type('string|null'),
 			'tags' => Expect::array(),
 			'reset' => Expect::array(),
 			'alteration' => Expect::bool(),
@@ -186,6 +187,7 @@ class DefinitionSchema implements Schema
 			'implement' => Expect::string(),
 			'create' => Expect::type('callable|Nette\DI\Definitions\Statement'),
 			'autowired' => Expect::type('bool|string|array'),
+			'tag' => Expect::type('string|null'),
 			'tags' => Expect::array(),
 		]);
 	}
@@ -203,6 +205,7 @@ class DefinitionSchema implements Schema
 			'tagged' => Expect::string(),
 			'inject' => Expect::bool(),
 			'autowired' => Expect::type('bool|string|array'),
+			'tag' => Expect::type('string|null'),
 			'tags' => Expect::array(),
 			'reset' => Expect::array(),
 		]);
@@ -216,6 +219,7 @@ class DefinitionSchema implements Schema
 			'references' => Expect::array(),
 			'tagged' => Expect::string(),
 			'autowired' => Expect::type('bool|string|array'),
+			'tag' => Expect::type('string|null'),
 			'tags' => Expect::array(),
 		]);
 	}
@@ -227,6 +231,7 @@ class DefinitionSchema implements Schema
 			'type' => Expect::string(),
 			'imported' => Expect::bool(),
 			'autowired' => Expect::type('bool|string|array'),
+			'tag' => Expect::type('string|null'),
 			'tags' => Expect::array(),
 		]);
 	}

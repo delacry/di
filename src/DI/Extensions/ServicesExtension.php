@@ -218,6 +218,10 @@ final class ServicesExtension extends Nette\DI\CompilerExtension
 			$definition->setAutowired($config->autowired);
 		}
 
+		if (property_exists($config, 'tag')) {
+			$definition->setTag($config->tag);
+		}
+
 		if (isset($config->tags)) {
 			if (!empty($config->reset['tags'])) {
 				$definition->setTags([]);

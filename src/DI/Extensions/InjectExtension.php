@@ -34,33 +34,48 @@ final class InjectExtension extends DI\CompilerExtension
 	public function beforeCompile(): void
 	{
 		foreach ($this->getContainerBuilder()->getDefinitions() as $def) {
-			if ($def->getTag(self::TagInject)) {
-				$def = $def instanceof Definitions\FactoryDefinition
-					? $def->getResultDefinition()
-					: $def;
-				if ($def instanceof Definitions\ServiceDefinition) {
-					$this->updateDefinition($def);
-				}
+			$target = $def instanceof Definitions\FactoryDefinition
+				? $def->getResultDefinition()
+				: $def;
+			if (!$target instanceof Definitions\ServiceDefinition) {
+				continue;
+			}
+
+			$class = $this->resolveTargetClass($target);
+			if ($class !== null) {
+				// Constructor-level #[Inject(tag:)] is per-parameter autowiring control;
+				// it applies regardless of whether the service opted into property/method injection.
+				self::applyInjectAttributesToConstructor($target, $class);
+			}
+
+			// Property and inject-method handling is gated behind inject:true (the legacy
+			// Nette convention) because it adds setup statements that change construction order.
+			if ($def->getTag(self::TagInject) && $class !== null) {
+				$this->updateDefinition($target, $class);
 			}
 		}
 	}
 
 
-	private function updateDefinition(Definitions\ServiceDefinition $def): void
+	private function resolveTargetClass(Definitions\ServiceDefinition $def): ?string
 	{
 		$resolvedType = (new DI\Resolver($this->getContainerBuilder()))->resolveEntityType($def->getCreator());
-		$class = $resolvedType && $def->getType() && is_subclass_of($resolvedType, $def->getType())
+		return $resolvedType && $def->getType() && is_subclass_of($resolvedType, $def->getType())
 			? $resolvedType
 			: $def->getType();
-		if (!$class) {
-			return;
-		}
+	}
 
+
+	private function updateDefinition(Definitions\ServiceDefinition $def, string $class): void
+	{
 		$setups = $def->getSetup();
 
-		foreach (self::getInjectProperties($class) as $property => $type) {
+		foreach (self::getInjectProperties($class) as $property => $info) {
 			$builder = $this->getContainerBuilder();
-			$inject = new Definitions\Statement(['@self', '$' . $property], [Definitions\Reference::fromType((string) $type)]);
+			$inject = new Definitions\Statement(
+				['@self', '$' . $property],
+				[Definitions\Reference::fromType($info['type'], $info['tag'])],
+			);
 			foreach ($setups as $key => $setup) {
 				if ($setup->getEntity() == $inject->getEntity()) { // intentionally ==
 					$inject = $setup;
@@ -70,13 +85,13 @@ final class InjectExtension extends DI\CompilerExtension
 			}
 
 			if ($builder) {
-				self::checkType($class, $property, $type, $builder);
+				self::checkType($class, $property, $info['type'], $builder, $info['tag']);
 			}
 			array_unshift($setups, $inject);
 		}
 
 		foreach (array_reverse(self::getInjectMethods($class)) as $method) {
-			$inject = new Definitions\Statement(['@self', $method]);
+			$inject = self::buildInjectMethodStatement($class, $method);
 			foreach ($setups as $key => $setup) {
 				if ($setup->getEntity() == $inject->getEntity()) { // intentionally ==
 					$inject = $setup;
@@ -88,6 +103,72 @@ final class InjectExtension extends DI\CompilerExtension
 		}
 
 		$def->setSetup($setups);
+	}
+
+
+	private static function applyInjectAttributesToConstructor(Definitions\ServiceDefinition $def, string $class): void
+	{
+		$ctor = (new \ReflectionClass($class))->getConstructor();
+		if ($ctor === null) {
+			return;
+		}
+
+		$creator = $def->getCreator();
+		$arguments = $creator->arguments;
+		$changed = false;
+
+		foreach ($ctor->getParameters() as $param) {
+			$attrs = $param->getAttributes(DI\Attributes\Inject::class);
+			if ($attrs === []) {
+				continue;
+			}
+
+			$tag = $attrs[0]->newInstance()->tag;
+			if ($tag === null) {
+				throw new Nette\InvalidStateException(sprintf(
+					'#[Inject] on parameter $%s in %s requires a tag — untagged parameters are autowired by type automatically.',
+					$param->getName(),
+					Reflection::toString($ctor),
+				));
+			}
+
+			$type = Nette\Utils\Type::fromReflection($param);
+			$typeName = DI\Helpers::ensureClassType($type, sprintf('type of parameter $%s in %s', $param->getName(), Reflection::toString($ctor)));
+			$arguments[$param->getName()] = Definitions\Reference::fromType($typeName, $tag);
+			$changed = true;
+		}
+
+		if ($changed) {
+			$def->setCreator($creator->getEntity(), $arguments);
+		}
+	}
+
+
+	private static function buildInjectMethodStatement(string $class, string $method): Definitions\Statement
+	{
+		$arguments = [];
+		foreach ((new \ReflectionMethod($class, $method))->getParameters() as $param) {
+			$attrs = $param->getAttributes(DI\Attributes\Inject::class);
+			if ($attrs === []) {
+				continue;
+			}
+
+			$tag = $attrs[0]->newInstance()->tag;
+			if ($tag === null) {
+				throw new Nette\InvalidStateException(sprintf(
+					'#[Inject] on parameter $%s in %s::%s() requires a tag — untagged parameters are autowired by type automatically.',
+					$param->getName(),
+					$class,
+					$method,
+				));
+			}
+
+			$type = Nette\Utils\Type::fromReflection($param);
+			$typeName = DI\Helpers::ensureClassType($type, sprintf('type of parameter $%s in %s::%s()', $param->getName(), $class, $method));
+			$arguments[$param->getName()] = Definitions\Reference::fromType($typeName, $tag);
+		}
+
+		return new Definitions\Statement(['@self', $method], $arguments);
 	}
 
 
@@ -114,31 +195,32 @@ final class InjectExtension extends DI\CompilerExtension
 
 
 	/**
-	 * Returns list of injectable properties with their types.
-	 * @return array<string, class-string>
+	 * Returns list of injectable properties with their types and optional identity tags.
+	 * @return array<string, array{type: class-string, tag: ?string}>
 	 * @internal
 	 */
 	public static function getInjectProperties(string $class): array
 	{
 		$res = [];
 		foreach ((new \ReflectionClass($class))->getProperties() as $rp) {
-			$hasAttr = $rp->getAttributes(DI\Attributes\Inject::class);
-			if ($hasAttr || DI\Helpers::parseAnnotation($rp, 'inject') !== null) {
-				if (!$hasAttr) {
-					trigger_error('Annotation @inject is deprecated, use #[Nette\DI\Attributes\Inject] and native typehint (used in ' . Reflection::toString($rp) . ')', E_USER_DEPRECATED);
-				}
-				if (!$rp->isPublic() || $rp->isStatic() || $rp->isReadOnly()) {
-					throw new Nette\InvalidStateException(sprintf('Property %s for injection must not be static, readonly and must be public.', Reflection::toString($rp)));
-				}
-
-				$type = Nette\Utils\Type::fromReflection($rp);
-				if (!$type && !$hasAttr && ($annotation = DI\Helpers::parseAnnotation($rp, 'var'))) {
-					$annotation = Reflection::expandClassName($annotation, Reflection::getPropertyDeclaringClass($rp));
-					$type = Nette\Utils\Type::fromString($annotation);
-				}
-
-				$res[$rp->getName()] = DI\Helpers::ensureClassType($type, 'type of property ' . Reflection::toString($rp));
+			$attrs = $rp->getAttributes(DI\Attributes\Inject::class);
+			if (!$attrs) {
+				continue;
 			}
+
+			if ($rp->isPromoted()) {
+				continue; // Constructor-promoted properties are wired via the constructor itself.
+			}
+
+			if (!$rp->isPublic() || $rp->isStatic() || $rp->isReadOnly()) {
+				throw new Nette\InvalidStateException(sprintf('Property %s for injection must not be static, readonly and must be public.', Reflection::toString($rp)));
+			}
+
+			$type = Nette\Utils\Type::fromReflection($rp);
+			$res[$rp->getName()] = [
+				'type' => DI\Helpers::ensureClassType($type, 'type of property ' . Reflection::toString($rp)),
+				'tag' => $attrs[0]->newInstance()->tag,
+			];
 		}
 
 		ksort($res);
@@ -155,9 +237,9 @@ final class InjectExtension extends DI\CompilerExtension
 			$container->callMethod([$service, $method]);
 		}
 
-		foreach (self::getInjectProperties($service::class) as $property => $type) {
-			self::checkType($service, $property, $type, $container);
-			$service->$property = $container->getByType($type);
+		foreach (self::getInjectProperties($service::class) as $property => $info) {
+			self::checkType($service, $property, $info['type'], $container, $info['tag']);
+			$service->$property = $container->getByType($info['type'], throw: true, tag: $info['tag']);
 		}
 	}
 
@@ -167,12 +249,14 @@ final class InjectExtension extends DI\CompilerExtension
 		string $name,
 		?string $type,
 		DI\Container|DI\ContainerBuilder $container,
+		?string $tag = null,
 	): void
 	{
-		if (!$container->getByType($type, throw: false)) {
+		if (!$container->getByType($type, throw: false, tag: $tag)) {
 			throw new Nette\DI\MissingServiceException(sprintf(
-				'Service of type %s required by %s not found. Did you add it to configuration file?',
+				'Service of type %s%s required by %s not found. Did you add it to configuration file?',
 				$type,
+				$tag !== null ? sprintf(" with tag '%s'", $tag) : '',
 				Reflection::toString(new \ReflectionProperty($class, $name)),
 			));
 		}

@@ -399,9 +399,9 @@ class Resolver
 		}
 
 		try {
-			return $this->getByType($service);
+			return $this->getByType($service, $ref->getTag());
 		} catch (NotAllowedDuringResolvingException) {
-			return new Reference($service);
+			return new Reference($service, $ref->getTag());
 		}
 	}
 
@@ -426,18 +426,19 @@ class Resolver
 	 * @throws MissingServiceException when not found
 	 * @throws NotAllowedDuringResolvingException
 	 */
-	public function getByType(string $type): Reference
+	public function getByType(string $type, ?string $tag = null): Reference
 	{
 		if (
 			$this->currentService
 			&& $this->currentServiceAllowed
 			&& $this->currentServiceType !== null
 			&& is_a($this->currentServiceType, $type, allow_string: true)
+			&& $tag === null
 		) {
 			return new Reference(Reference::Self);
 		}
 
-		$name = $this->builder->getByType($type, throw: true);
+		$name = $this->builder->getByType($type, throw: true, tag: $tag);
 		if (
 			!$this->currentServiceAllowed
 			&& $this->currentService === $this->builder->getDefinition($name)
@@ -445,7 +446,7 @@ class Resolver
 			throw new MissingServiceException;
 		}
 
-		return new Reference($name);
+		return new Reference($name, $tag);
 	}
 
 

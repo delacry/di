@@ -9,6 +9,11 @@ class Container extends Nette\DI\Container
 	protected array $aliases = [];
 	protected array $wiring = ['Nette\DI\Container' => [['container']], 'stdClass' => [['01', 'name']]];
 
+	protected array $byTypeAndTag = [
+		'Nette\DI\Container' => ['default' => ['container']],
+		'stdClass' => ['default' => ['01', 'name']],
+	];
+
 
 	/**
 	 * @param  mixed[]  $params

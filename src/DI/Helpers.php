@@ -10,9 +10,8 @@ namespace Nette\DI;
 use Nette;
 use Nette\DI\Definitions\Reference;
 use Nette\DI\Definitions\Statement;
-use Nette\Utils\Reflection;
 use Nette\Utils\Type;
-use function array_key_exists, array_keys, array_shift, class_exists, explode, get_debug_type, implode, interface_exists, is_array, is_scalar, is_string, preg_match, preg_quote, preg_replace, preg_split, sprintf, str_replace, strlen, strncmp, substr, trim, ucfirst, var_export;
+use function array_key_exists, array_keys, array_shift, class_exists, explode, get_debug_type, implode, interface_exists, is_array, is_scalar, is_string, preg_match, preg_replace, preg_split, sprintf, str_replace, strlen, strncmp, substr, trim, ucfirst, var_export;
 
 
 /**
@@ -157,15 +156,16 @@ final class Helpers
 
 
 	/**
-	 * Converts @service strings to Reference objects recursively.
+	 * Converts @service strings to Reference objects recursively. The optional `#tag`
+	 * suffix (e.g. `@Foo\Bar#doctrine`) narrows resolution to a specific identity tag.
 	 * @param  array<mixed>  $args
 	 * @return array<mixed>
 	 */
 	public static function filterArguments(array $args): array
 	{
 		foreach ($args as $k => $v) {
-			if (is_string($v) && preg_match('#^@[\w\\\]+$#D', $v)) {
-				$args[$k] = new Reference(substr($v, 1));
+			if (is_string($v) && preg_match('#^@([\w\\\\]+)(?:\#(\w+))?$#D', $v, $m)) {
+				$args[$k] = new Reference($m[1], $m[2] ?? null);
 			} elseif (is_array($v)) {
 				$args[$k] = self::filterArguments($v);
 			} elseif ($v instanceof Statement) {
@@ -203,28 +203,6 @@ final class Helpers
 		}
 
 		return $config;
-	}
-
-
-	/**
-	 * Returns an annotation value.
-	 * @param  \ReflectionClass<object>|\ReflectionFunctionAbstract|\ReflectionProperty  $ref
-	 */
-	public static function parseAnnotation(
-		\ReflectionFunctionAbstract|\ReflectionProperty|\ReflectionClass $ref,
-		string $name,
-	): ?string
-	{
-		if (!Reflection::areCommentsAvailable()) {
-			throw new Nette\InvalidStateException('You have to enable phpDoc comments in opcode cache.');
-		}
-
-		$re = '#[\s*]@' . preg_quote($name, '#') . '(?=\s|$)(?:[ \t]+([^@\s]\S*))?#';
-		if ($ref->getDocComment() && preg_match($re, trim($ref->getDocComment(), '/*'), $m)) {
-			return $m[1] ?? '';
-		}
-
-		return null;
 	}
 
 

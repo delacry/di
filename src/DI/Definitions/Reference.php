@@ -10,6 +10,8 @@ namespace Nette\DI\Definitions;
 
 /**
  * Reference to service. Either by name or by type or reference to the 'self' service.
+ * Type references may additionally carry an identity tag that narrows resolution to
+ * services with that exact tag.
  */
 final class Reference
 {
@@ -21,19 +23,21 @@ final class Reference
 
 	/**
 	 * Creates a type-based reference (resolved by class name rather than service name).
+	 * Optional $tag narrows to services with that identity tag.
 	 */
-	public static function fromType(string $value): static
+	public static function fromType(string $value, ?string $tag = null): static
 	{
 		if (!str_contains($value, '\\')) {
 			$value = '\\' . $value;
 		}
 
-		return new static($value);
+		return new static($value, $tag);
 	}
 
 
 	public function __construct(
 		private readonly string $value,
+		private readonly ?string $tag = null,
 	) {
 	}
 
@@ -41,6 +45,12 @@ final class Reference
 	public function getValue(): string
 	{
 		return $this->value;
+	}
+
+
+	public function getTag(): ?string
+	{
+		return $this->tag;
 	}
 
 

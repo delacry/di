@@ -1,21 +1,28 @@
 {
-	"name": "nette/di",
-	"description": "💎 Nette Dependency Injection Container: Flexible, compiled and full-featured DIC with perfectly usable autowiring and support for all new PHP features.",
-	"keywords": ["nette", "di", "dic", "ioc", "factory", "compiled", "static"],
-	"homepage": "https://nette.org",
+	"name": "delacry/di",
+	"description": "Compiled dependency injection container — fork of nette/di adding tag-based service identity, #[Inject(tag:)], NEON @Type#tag references, and array<string, T> bag-of-services autowire.",
+	"keywords": ["di", "dic", "ioc", "factory", "compiled", "static", "tag"],
+	"homepage": "https://github.com/rixafy/di",
 	"license": ["BSD-3-Clause", "GPL-2.0-only", "GPL-3.0-only"],
 	"authors": [
 		{
 			"name": "David Grudl",
-			"homepage": "https://davidgrudl.com"
+			"homepage": "https://davidgrudl.com",
+			"role": "Original author of nette/di"
+		},
+		{
+			"name": "Delacry",
+			"homepage": "https://github.com/delacry",
+			"role": "Fork maintainer"
 		},
 		{
 			"name": "Nette Community",
-			"homepage": "https://nette.org/contributors"
+			"homepage": "https://nette.org/contributors",
+			"role": "Original contributors to nette/di"
 		}
 	],
 	"require": {
-		"php": "8.2 - 8.5",
+		"php": "8.4 - 8.5",
 		"ext-tokenizer": "*",
 		"ext-ctype": "*",
 		"nette/neon": "^3.4",
@@ -23,6 +30,9 @@
 		"nette/robot-loader": "^4.0",
 		"nette/schema": "^1.3",
 		"nette/utils": "^4.0"
+	},
+	"replace": {
+		"nette/di": "3.3.*"
 	},
 	"require-dev": {
 		"nette/tester": "^2.6",

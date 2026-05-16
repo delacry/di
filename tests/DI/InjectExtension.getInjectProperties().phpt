@@ -42,9 +42,9 @@ require __DIR__ . '/../bootstrap.php';
 
 
 Assert::same([
-	'varA' => AInjected::class,
-	'varB' => BInjected::class,
-	'varF' => stdClass::class,
+	'varA' => ['type' => AInjected::class, 'tag' => null],
+	'varB' => ['type' => BInjected::class, 'tag' => null],
+	'varF' => ['type' => stdClass::class, 'tag' => null],
 ], InjectExtension::getInjectProperties(AClass::class));
 
 Assert::exception(
