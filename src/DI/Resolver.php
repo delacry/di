@@ -258,11 +258,11 @@ class Resolver
 			case is_string($entity): // create class
 				if (!class_exists($entity)) {
 					throw new ServiceCreationException(sprintf("Class '%s' not found.", $entity));
-				} elseif ((new \ReflectionClass($entity))->isAbstract()) {
+				} elseif (new \ReflectionClass($entity)->isAbstract()) {
 					throw new ServiceCreationException(sprintf('Class %s is abstract.', $entity));
-				} elseif (($rm = (new \ReflectionClass($entity))->getConstructor()) !== null && !$rm->isPublic()) {
+				} elseif (($rm = new \ReflectionClass($entity)->getConstructor()) !== null && !$rm->isPublic()) {
 					throw new ServiceCreationException(sprintf('Class %s has %s constructor.', $entity, $rm->isProtected() ? 'protected' : 'private'));
-				} elseif ($constructor = (new \ReflectionClass($entity))->getConstructor()) {
+				} elseif ($constructor = new \ReflectionClass($entity)->getConstructor()) {
 					$arguments = self::autowireArguments($constructor, $arguments, $getter);
 					$this->addDependency($constructor);
 				} elseif ($arguments) {
@@ -719,10 +719,10 @@ class Resolver
 		$nameRe = preg_quote($parameter->name, '#');
 
 		// tagged map: array<string, T>
-		if (preg_match('#@param[ \t]+array<string,\s*([\w\\\\]+)>[ \t]+\$' . $nameRe . '#', $docComment, $m)) {
+		if (preg_match('#@param[ \t]+array<string,\s*([\w\\\]+)>[ \t]+\$' . $nameRe . '#', $docComment, $m)) {
 			$tagged = true;
 		// untagged list: T[] | list<T> | array<int, T>
-		} elseif (preg_match('#@param[ \t]+(?|([\w\\\\]+)\[\]|list<([\w\\\\]+)>|array<int,\s*([\w\\\\]+)>)[ \t]+\$' . $nameRe . '#', $docComment, $m)) {
+		} elseif (preg_match('#@param[ \t]+(?|([\w\\\]+)\[\]|list<([\w\\\]+)>|array<int,\s*([\w\\\]+)>)[ \t]+\$' . $nameRe . '#', $docComment, $m)) {
 			$tagged = false;
 		} else {
 			return null;

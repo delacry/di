@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**delacry fork of Nette DI** — a compiled Dependency Injection Container for PHP, based on [nette/di](https://github.com/nette/di) v3.3 (commit `d16957a`). The fork ships [PR #321](https://github.com/nette/di/pull/321) (tag-based injection — open against upstream since May 2024 with no movement) plus a broader (type, tag) identity model layered on top of upstream's existing autowiring.
+**delacry fork of Nette DI** — a compiled Dependency Injection Container for PHP, based on [nette/di](https://github.com/nette/di) v3.3 (commit `d16957a`). The fork ships [PR #321](https://github.com/nette/di/pull/321) (tag-based injection — open against upstream since May 2025 with no movement) plus a broader (type, tag) identity model layered on top of upstream's existing autowiring.
 
 **Key characteristics:**
 - Compiled container generates optimized PHP code for maximum performance
@@ -13,7 +13,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - O(1) precomputed `(type, tag) → names` index on the generated container — ~108 ns/op tag-filtered lookups
 - NEON configuration format with the fork's `@Type#tag` reference syntax
 - `#[Inject(tag:)]` attribute on properties, constructor parameters, and inject-method parameters
-- Supports PHP 8.2 – 8.5
+- Supports PHP 8.4 – 8.5
 - ~5,900 lines of production code
 
 **Not tracking upstream.** Upstream branches force-push (the original PR #321's commits got rewritten when dg moved them between branches). Pulling fixes from upstream is done by cherry-picking specific commits, not by merge or rebase.
@@ -41,7 +41,6 @@ Use `git log d16957a..` to see the actual hashes; the list above is order-of-app
 **Runtime container API:**
 - `Container::get(string $type, ?string $tag = null): object` — canonical lookup. Always throws on miss/ambiguity. O(1) via the precomputed index.
 - `Container::getByType($type, $throw, ?$tag)` — same shape with optional `$throw=false` for nullable returns and explicit `$tag`.
-- `Container::findByTypeAndTag($type, ?$tag)` — index introspection.
 - `array<string, T>` PHPDoc-typed constructor parameters get autowired as a tag→service map (via `Resolver::isArrayOf` extension). Compile-time error if two services share an identity tag for the same type. The pre-existing `T[]`/`list<T>`/`array<int, T>` patterns are unchanged — they still autowire as numerically-keyed lists.
 - `Container::$byTypeAndTag` — `array<class-string, array<tag, list<name>>>`, populated from the high-priority autowiring slot at compile time.
 - `Container::$serviceTags` — `array<service_name, string>`, only populated for services whose identity tag is non-default (saves bytes in the generated container).
@@ -92,7 +91,7 @@ The original tag-identity vision included two more constraints that didn't land 
 - **`addDefinition($name)` throwing on non-null name.** 47 test files + every Nette ecosystem extension passes names to `addDefinition()`. Keeping the engine permissive lets that code keep working; consumers who want the strict rule enforce it at config-parse time in their own bundle / config-validation layer before reaching `addDefinition()`.
 - **NEON `services: { foo: Bar }` keys becoming aliases rather than identity.** Same reason — would cascade through `ServicesExtension`, `removeDefinition`, alteration logic, and every test asserting specific service names. Consumers wanting this enforce it at their own config-validation layer.
 
-Both constraints are *configurable on top of* the engine — the deprecation markers and `findByTypeAndTag` helper signal the direction without breaking BC.
+Both constraints are *configurable on top of* the engine — the deprecation markers signal the direction without breaking BC.
 
 ## Essential Commands
 
@@ -105,7 +104,6 @@ Tests use Nette Tester (not PHPUnit) with `.phpt` file format. **Note:** the tes
 vendor/bin/tester -p php -c php.ini tests/DI
 
 # Run a single test
-vendor/bin/tester -p php -c php.ini tests/DI/Container.findByTypeAndTag.phpt
 
 # With info / parallelism / output
 vendor/bin/tester -p php -c php.ini -s tests/DI
@@ -161,7 +159,6 @@ Tag-aware tests live in:
 - `tests/DI/InjectExtension.tags.phpt` — property + ctor + inject-method polymorphic resolution.
 - `tests/DI/InjectExtension.tags.errors.phpt` — bare `#[Inject]` on ctor/inject param throws; ambiguity errors.
 - `tests/DI/NeonAdapter.tagRef.phpt` — `@\Type#tag` NEON syntax end-to-end.
-- `tests/DI/Container.findByTypeAndTag.phpt` — precomputed index introspection.
 
 ## Architecture Overview
 
@@ -177,7 +174,7 @@ Standard upstream flow with one new step:
 
 ### Core Components
 
-- **`Container.php`** — Runtime. `get($type, ?$tag)`, `getByType()`, `getService()` (`@deprecated`), `findByTypeAndTag()`, `findByTag()`. Holds `$wiring`, `$tags`, `$serviceTags`, `$byTypeAndTag`.
+- **`Container.php`** — Runtime. `get($type, ?$tag)`, `getByType()`, `getService()` (`@deprecated`), `findByTag()`. Holds `$wiring`, `$tags`, `$serviceTags`, `$byTypeAndTag`.
 - **`Compiler.php`** — Orchestrates compilation. Default extensions: `ServicesExtension` + `ParametersExtension` only. `InjectExtension` is opt-in.
 - **`ContainerBuilder.php`** — `addDefinition($name, ?Definition)`, `getByType($type, $throw, ?$tag)`, `exportMeta()` (emits all the runtime metadata, including the new `byTypeAndTag` index).
 - **`Resolver.php`** — `getByType($type, ?$tag)` returns a `Reference` carrying the tag; `normalizeReference()` propagates the tag through type-to-name resolution.
@@ -281,17 +278,17 @@ $container->get(CacheInterface::class, 'missing');   // throws MissingServiceExc
 Same lifecycle as upstream (`getConfigSchema()`, `loadConfiguration()`, `beforeCompile()`, `afterCompile()`, `$initialization`). The key extension-author thing to know about this fork:
 
 - If your extension cares about identity tags, read them via `$def->getTag()` (returns `string`, `"default"` if unset).
-- To filter the container builder's services by identity tag, walk `$builder->getDefinitions()` and check `$def->getTag()`. There is no `findByIdentityTag()` helper at the builder level — only at the runtime `Container::findByTypeAndTag()`.
+- To filter services by identity tag at compile or runtime, walk `$builder->getDefinitions()` (compile-time) or iterate the runtime `$wiring`/`$serviceTags` and check `$def->getTag()` / `$container->serviceTags[$name] ?? Definition::DefaultTag`. There is no dedicated `findByIdentityTag()` helper.
 - The legacy `tags:` metadata bag (multi-key, with values) is unchanged. `Definition::getTagValue($name)` (renamed from `getTag()`) gives single-key access; `getTags()` returns the whole bag.
 
 ## Important Files
 
 - `readme.md` — fork-focused overview, what's added on top of nette/di.
-- `src/DI/Container.php` — runtime; the `get()` / `getByType()` / `findByTypeAndTag()` API.
+- `src/DI/Container.php` — runtime; the `get()` / `getByType()` API.
 - `src/DI/Autowiring.php` — `getByType($type, $throw, $tag)` resolution rules.
 - `src/DI/Extensions/InjectExtension.php` — `#[Inject(tag:)]` handling at all three sites (ctor, property, inject method).
 - `src/DI/ContainerBuilder.php::exportMeta()` — where the runtime metadata (including `$byTypeAndTag`) gets baked.
-- `tests/DI/Autowiring.tag.phpt`, `InjectExtension.tags.phpt`, `Container.findByTypeAndTag.phpt`, `NeonAdapter.tagRef.phpt` — the new tag-feature tests.
+- `tests/DI/Autowiring.tag.phpt`, `InjectExtension.tags.phpt`, `NeonAdapter.tagRef.phpt` — the new tag-feature tests.
 
 ## Code Style
 

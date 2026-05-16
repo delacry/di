@@ -35,7 +35,7 @@ final class PhpAdapter implements Nette\DI\Config\Adapter
 
 	private function processClosure(\Closure $callback, string $file): array
 	{
-		$params = (new \ReflectionFunction($callback))->getParameters();
+		$params = new \ReflectionFunction($callback)->getParameters();
 		if (count($params) !== 1) {
 			throw new Nette\InvalidStateException(sprintf("Callback in configuration file '%s' must have exactly one parameter.", $file));
 		}

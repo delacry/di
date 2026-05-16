@@ -16,13 +16,7 @@ use function class_exists, interface_exists, is_array, is_string, sprintf;
  */
 abstract class Definition
 {
-	private ?string $name = null;
-
-	/** @var class-string|null */
-	private ?string $type = null;
-
-	/** @var array<string, mixed> */
-	private array $tags = [];
+	public const DefaultTag = 'default';
 
 	/**
 	 * Identity tag — a single string discriminator used together with the service type
@@ -34,6 +28,13 @@ abstract class Definition
 	 * DefaultTag when null, use getTag() instead.
 	 */
 	public private(set) ?string $tag = null;
+	private ?string $name = null;
+
+	/** @var class-string|null */
+	private ?string $type = null;
+
+	/** @var array<string, mixed> */
+	private array $tags = [];
 
 	/** @var bool|class-string[] */
 	private bool|array $autowired = true;
@@ -141,9 +142,6 @@ abstract class Definition
 		$this->tag = $tag;
 		return $this;
 	}
-
-
-	public const DefaultTag = 'default';
 
 
 	/**

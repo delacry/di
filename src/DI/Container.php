@@ -200,10 +200,10 @@ class Container
 			return $this->getServiceType($this->aliases[$name]);
 
 		} elseif (isset($this->methods[$method])) {
-			return (string) (new \ReflectionMethod($this, $method))->getReturnType();
+			return (string) new \ReflectionMethod($this, $method)->getReturnType();
 
 		} elseif ($cb = $this->factories[$name] ?? null) {
-			return (string) (new \ReflectionFunction($cb))->getReturnType();
+			return (string) new \ReflectionFunction($cb)->getReturnType();
 
 		} else {
 			throw new MissingServiceException(sprintf("Type of service '%s' not known.", $name));
@@ -426,25 +426,6 @@ class Container
 
 
 	/**
-	 * Returns service names matching (type, tag) from the precomputed index. With $tag null,
-	 * returns the full tag → names map for the type. Used internally by Container::get() and
-	 * the planned bag-of-services autowiring (array<string, T> ctor params keyed by tag).
-	 *
-	 * @param  class-string  $type
-	 * @return ($tag is null ? array<string, list<string>> : list<string>)
-	 */
-	public function findByTypeAndTag(string $type, ?string $tag = null): array
-	{
-		$type = Helpers::normalizeClass($type);
-		if ($tag === null) {
-			return $this->byTypeAndTag[$type] ?? [];
-		}
-
-		return $this->byTypeAndTag[$type][$tag] ?? [];
-	}
-
-
-	/**
 	 * Returns all registered services as a map of service name to type.
 	 * Aliases are not included — use getAliases() separately.
 	 * @return array<string, string>
@@ -455,11 +436,11 @@ class Container
 		foreach (array_keys($this->methods) as $method) {
 			if (strlen($method) > 13 && str_starts_with($method, 'createService')) {
 				$name = lcfirst(str_replace('__', '.', substr($method, 13)));
-				$types[$name] = (string) (new \ReflectionMethod($this, $method))->getReturnType();
+				$types[$name] = (string) new \ReflectionMethod($this, $method)->getReturnType();
 			}
 		}
 		foreach ($this->factories as $name => $cb) {
-			$types[$name] = (string) (new \ReflectionFunction($cb))->getReturnType();
+			$types[$name] = (string) new \ReflectionFunction($cb)->getReturnType();
 		}
 		return $types;
 	}

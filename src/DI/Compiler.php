@@ -272,7 +272,7 @@ class Compiler
 
 		foreach ($this->extensions as $extension) {
 			$extension->beforeCompile();
-			if ($file = (new \ReflectionClass($extension))->getFileName()) {
+			if ($file = new \ReflectionClass($extension)->getFileName()) {
 				$this->dependencies->add([$file]);
 			}
 		}

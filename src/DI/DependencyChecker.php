@@ -56,7 +56,7 @@ class DependencyChecker
 					$all = [$name] + class_parents($name) + class_implements($name);
 					foreach ($all as &$item) {
 						$all += class_uses($item);
-						$phpFiles[] = (new ReflectionClass($item))->getFileName();
+						$phpFiles[] = new ReflectionClass($item)->getFileName();
 						$classes[$item] = true;
 					}
 				}

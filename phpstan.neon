@@ -156,6 +156,9 @@ parameters:
 		- # processClosure return type comes from user closure
 			identifier: missingType.iterableValue
 			path: src/DI/Config/Adapters/PhpAdapter.php
+		- # processClosure $callback is deliberately a bare Closure (user-provided signature unknown)
+			identifier: missingType.callable
+			path: src/DI/Config/Adapters/PhpAdapter.php
 		- # preg_replace accepts string|null in practice (null is treated as empty)
 			identifier: argument.type
 			path: src/DI/ContainerLoader.php

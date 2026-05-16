@@ -436,13 +436,13 @@ class ContainerBuilder
 	{
 		array_walk_recursive($args, function (&$val): void {
 			if ($val instanceof Nette\DI\Definitions\Statement) {
-				$val = (new Resolver($this))->completeStatement($val);
+				$val = new Resolver($this)->completeStatement($val);
 
 			} elseif ($val instanceof Definition) {
 				assert($val->getName() !== null);
 				$val = new Definitions\Reference($val->getName());
 			}
 		});
-		return (new PhpGenerator($this))->formatPhp($statement, $args);
+		return new PhpGenerator($this)->formatPhp($statement, $args);
 	}
 }

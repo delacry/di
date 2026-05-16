@@ -59,7 +59,7 @@ final class InjectExtension extends DI\CompilerExtension
 
 	private function resolveTargetClass(Definitions\ServiceDefinition $def): ?string
 	{
-		$resolvedType = (new DI\Resolver($this->getContainerBuilder()))->resolveEntityType($def->getCreator());
+		$resolvedType = new DI\Resolver($this->getContainerBuilder())->resolveEntityType($def->getCreator());
 		return $resolvedType && $def->getType() && is_subclass_of($resolvedType, $def->getType())
 			? $resolvedType
 			: $def->getType();
@@ -108,7 +108,7 @@ final class InjectExtension extends DI\CompilerExtension
 
 	private static function applyInjectAttributesToConstructor(Definitions\ServiceDefinition $def, string $class): void
 	{
-		$ctor = (new \ReflectionClass($class))->getConstructor();
+		$ctor = new \ReflectionClass($class)->getConstructor();
 		if ($ctor === null) {
 			return;
 		}
@@ -147,7 +147,7 @@ final class InjectExtension extends DI\CompilerExtension
 	private static function buildInjectMethodStatement(string $class, string $method): Definitions\Statement
 	{
 		$arguments = [];
-		foreach ((new \ReflectionMethod($class, $method))->getParameters() as $param) {
+		foreach (new \ReflectionMethod($class, $method)->getParameters() as $param) {
 			$attrs = $param->getAttributes(DI\Attributes\Inject::class);
 			if ($attrs === []) {
 				continue;
@@ -182,7 +182,7 @@ final class InjectExtension extends DI\CompilerExtension
 		$classes = [];
 		foreach (get_class_methods($class) as $name) {
 			if (str_starts_with($name, 'inject')) {
-				$classes[$name] = (new \ReflectionMethod($class, $name))->getDeclaringClass()->name;
+				$classes[$name] = new \ReflectionMethod($class, $name)->getDeclaringClass()->name;
 			}
 		}
 
@@ -202,7 +202,7 @@ final class InjectExtension extends DI\CompilerExtension
 	public static function getInjectProperties(string $class): array
 	{
 		$res = [];
-		foreach ((new \ReflectionClass($class))->getProperties() as $rp) {
+		foreach (new \ReflectionClass($class)->getProperties() as $rp) {
 			$attrs = $rp->getAttributes(DI\Attributes\Inject::class);
 			if (!$attrs) {
 				continue;

@@ -145,7 +145,7 @@ final class FactoryDefinition extends Definition
 
 		$ctorParams = [];
 		$class = $resolver->resolveEntityType($this->resultDefinition->getCreator());
-		if ($class !== null && class_exists($class) && ($ctor = (new \ReflectionClass($class))->getConstructor())) {
+		if ($class !== null && class_exists($class) && ($ctor = new \ReflectionClass($class)->getConstructor())) {
 			foreach ($ctor->getParameters() as $param) {
 				$ctorParams[$param->name] = $param;
 			}

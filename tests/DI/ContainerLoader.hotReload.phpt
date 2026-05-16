@@ -51,7 +51,7 @@ Assert::same($before, $generation, 'Generator was NOT invoked (cache hit)');
 
 // 3) Simulate config change: invalidate the cached container's dependency hash
 //    so isExpired() returns true, then load again.
-$file = (new ReflectionClass($class))->getFileName();
+$file = new ReflectionClass($class)->getFileName();
 $meta = unserialize(file_get_contents("$file.meta"));
 $meta[1][__FILE__] = 0; // tracked file mtime mutated → DependencyChecker returns expired
 file_put_contents("$file.meta", serialize($meta));
@@ -76,7 +76,7 @@ Assert::notSame($class, $returned, 'Reload class is distinct symbol');
 
 
 // 5) Multiple reloads produce distinct class names.
-$file = (new ReflectionClass($class))->getFileName();
+$file = new ReflectionClass($class)->getFileName();
 $meta = unserialize(file_get_contents("$file.meta"));
 $meta[1][__FILE__] = 1;
 file_put_contents("$file.meta", serialize($meta));
@@ -100,7 +100,7 @@ $prodLoader->load(fn(DI\Compiler $c): string => "class $prodClass extends \\Nett
 Assert::true(class_exists($prodClass, autoload: false));
 
 // Even after the meta is invalidated, autoRebuild=false means isExpired() returns false → cache hit.
-$prodFile = (new ReflectionClass($prodClass))->getFileName();
+$prodFile = new ReflectionClass($prodClass)->getFileName();
 $prodMeta = unserialize(file_get_contents("$prodFile.meta"));
 $prodMeta[1][__FILE__] = 0;
 file_put_contents("$prodFile.meta", serialize($prodMeta));

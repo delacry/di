@@ -27,7 +27,7 @@ final class LocatorDefinition extends Definition
 			throw new Nette\InvalidArgumentException(sprintf("Service '%s': Interface '%s' not found.", $this->getName(), $interface));
 		}
 
-		$methods = (new \ReflectionClass($interface))->getMethods();
+		$methods = new \ReflectionClass($interface)->getMethods();
 		if (!$methods) {
 			throw new Nette\InvalidArgumentException(sprintf("Service '%s': Interface %s must have at least one method.", $this->getName(), $interface));
 		}
@@ -142,7 +142,7 @@ final class LocatorDefinition extends Definition
 				->setPrivate()
 				->setType($generator->getClassName());
 
-		foreach ((new \ReflectionClass($type))->getMethods() as $rm) {
+		foreach (new \ReflectionClass($type)->getMethods() as $rm) {
 			if (!preg_match('#^(get|create)(.*)#', $rm->name, $m)) {
 				continue;
 			}
