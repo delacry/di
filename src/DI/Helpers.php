@@ -164,8 +164,8 @@ final class Helpers
 	public static function filterArguments(array $args): array
 	{
 		foreach ($args as $k => $v) {
-			if (is_string($v) && preg_match('#^@([\w\\\]+)(?:\#(\w+))?$#D', $v, $m)) {
-				$args[$k] = new Reference($m[1], $m[2] ?? null);
+			if (is_string($v) && ($ref = Reference::fromConfigString($v)) !== null) {
+				$args[$k] = $ref;
 			} elseif (is_array($v)) {
 				$args[$k] = self::filterArguments($v);
 			} elseif ($v instanceof Statement) {
