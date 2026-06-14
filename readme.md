@@ -4,7 +4,7 @@ A fork of [nette/di](https://github.com/nette/di) that adds **tag-based dependen
 
 ## Why this fork exists
 
-[nette/di#321](https://github.com/nette/di/pull/321) - *InjectExtension: added support for injecting services by tags* - has been open against upstream since May 2025 with no movement. This fork picks the feature up, ships it, and extends the model further: a first-class identity tag on every service definition, a new canonical `Container::get()` lookup, NEON `@Type#tag` reference syntax, and an O(1) precomputed `(type, tag)` index on the compiled container.
+[nette/di#321](https://github.com/nette/di/pull/321) - *InjectExtension: added support for injecting services by tags* - has been open against upstream since May 2025 with no movement. This fork picks the feature up, ships it, and extends the model further: a first-class identity tag on every service definition, a new canonical `Container::get()` lookup, NEON `@Type#tag` reference syntax, an O(1) precomputed `(type, tag)` index on the compiled container, and deterministic ordering of autowired collections via per-definition `priority`/`before`/`after`.
 
 For everything else about Nette DI - service definitions, factories, decorators, NEON syntax, autowiring rules, extension authoring - see [nette/di's documentation](https://doc.nette.org/dependency-injection). All of it works the same here. This README only covers what's different.
 
@@ -133,6 +133,35 @@ Given the services above, `$pools` is filled with `['fast' => $redisCache, 'slow
 
 The pre-existing `T[]`, `list<T>` and `array<int, T>` patterns continue to autowire as numerically-keyed lists, unchanged from upstream. If two services of the same type share the same identity tag, the `array<string, T>` autowire throws at compile time (the tag → service mapping must be unambiguous).
 
+### Deterministic collection ordering: `priority` / `before` / `after`
+
+When a parameter autowires a *collection* of a type (`T[]`, `list<T>`, `array<int, T>`, or the tag-keyed `array<string, T>` above), the collected services come back in registration order - which, for attribute- or filesystem-discovered services, is not reproducible across machines. Each `Definition` carries optional ordering metadata that makes the order deterministic:
+
+```php
+$builder->addDefinition('appRouter')
+    ->setType(App\AppRouter::class)
+    ->setPriority(100);                    // higher is collected first
+
+$builder->addDefinition('adminRouter')
+    ->setType(Admin\AdminRouter::class)
+    ->setBefore([App\AppRouter::class])    // relative: collected before AppRouter
+    ->setAfter([Core\CoreRouter::class]);  // …and after CoreRouter
+```
+
+The order is resolved by `Nette\DI\DefinitionOrdering` and applied wherever a collection of a type is assembled - autowired collection parameters as well as direct `ContainerBuilder::findByType()` / `findAutowired()` calls all return services in this order:
+
+- **`priority`** (`?int`, default `null` → treated as `0`) - an absolute tier; higher is collected first.
+- **`before` / `after`** (`list<class-string>`) - relative, hard constraints against other collected services. They become edges in a topological sort; `priority`, then the service's type FQCN, then its name break ties among otherwise-unordered services.
+
+Rules:
+
+- A collection in which **nothing** carries ordering metadata is returned in registration order, untouched - existing code and other Nette DI users see no behavioural change.
+- `before`/`after` match by `is_a`, so referencing an **interface** orders this service against every collected implementation of it.
+- A reference that matches **no** collected service is silently ignored - that's how a package can declare "I run before X" when X may not be installed.
+- A **cycle** (A before B, B before A) throws `ServiceCreationException` at compile time, naming the tangled services.
+
+These are storage-only primitives: the engine reads them, but never sets them itself. A higher layer (e.g. an attribute-driven compiler pass) decides what they mean and calls the setters - the same division of labour as the multi-key `tags:` bag.
+
 ## What's removed
 
 - Legacy `@inject` docblock annotation fallback in `InjectExtension` (use the `#[Inject]` attribute)
@@ -154,15 +183,16 @@ This fork keeps the engine permissive:
 
 - `addDefinition($name, …)` with a non-null name still works
 - `services: { foo: Bar }` NEON keys still register `foo` as the service name
-- All existing tests pass (162 in total)
+- Collection ordering is opt-in: a collection with no `priority`/`before`/`after` is returned in registration order, exactly as before
+- All existing tests pass
 
-Tag-aware features are strictly additive. Calling code that doesn't use tags behaves exactly like upstream nette/di v3.3.
+Tag-aware features and the ordering primitives are strictly additive. Calling code that doesn't use them behaves exactly like upstream nette/di v3.3.
 
 ## Status
 
 - Based on upstream `nette/di` v3.3 (commit `d16957a`).
 - Not tracking upstream - upstream branches force-push, so changes from upstream are cherry-picked when needed.
-- Tests: 164 pass (was 157 on the v3.3 baseline; +7 new for the tag features and the `array<string, T>` bag autowire).
+- Tests: 178 pass (was 157 on the v3.3 baseline; the tag features, the `array<string, T>` bag autowire, and deterministic collection ordering are the additions).
 - **PHP requirement: 8.4 – 8.5** (bumped from upstream's 8.2 – 8.5; the fork uses asymmetric property visibility for `Definition::$tag` and other 8.4-only conveniences). If you need 8.2 or 8.3 compatibility, stay on upstream `nette/di`.
 
 ## Documentation

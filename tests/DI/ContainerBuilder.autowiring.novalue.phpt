@@ -36,7 +36,7 @@ Assert::exception(function () {
 	$builder = new DI\ContainerBuilder;
 	$builder->addDefinition('foo')->setType(Bar::class);
 	$container = createContainer($builder);
-}, Nette\DI\ServiceCreationException::class, "Service 'foo' (type of Bar): Parameter \$x in Bar::__construct() has no class type or default value, so its value must be specified.");
+}, Nette\DI\ServiceCreationException::class, "Service 'foo' (type of Bar): Parameter \$x in Bar::__construct() is an array with no value. To autowire a collection of services, annotate it @param list<Type> (or Type[], array<int, Type>) for a list of services, or @param array<string, Type> for a tag-keyed map, where Type is a registered class or interface; otherwise pass the value in the service definition.");
 
 
 class Bar2

@@ -691,6 +691,15 @@ class Resolver
 		} elseif ($parameter->isOptional()) {
 			return null;
 
+		} elseif ($type?->getSingleName() === 'array') {
+			throw new ServiceCreationException(sprintf(
+				'Parameter %s is an array with no value. To autowire a collection of services, '
+				. 'annotate it @param list<Type> (or Type[], array<int, Type>) for a list of services, '
+				. 'or @param array<string, Type> for a tag-keyed map, where Type is a registered class '
+				. 'or interface; otherwise pass the value in the service definition.',
+				$desc,
+			));
+
 		} else {
 			throw new ServiceCreationException(sprintf(
 				'Parameter %s has %s, so its value must be specified.',

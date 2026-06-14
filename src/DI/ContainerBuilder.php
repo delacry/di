@@ -396,9 +396,9 @@ class ContainerBuilder
 		[$low, $high] = $this->autowiring->getClassList();
 		foreach ($all as $class => $names) {
 			$meta['wiring'][$class] = array_filter([
-				$high[$class] ?? [],
-				$low[$class] ?? [],
-				array_diff($names, $low[$class] ?? [], $high[$class] ?? []),
+				$this->orderNames($high[$class] ?? []),
+				$this->orderNames($low[$class] ?? []),
+				$this->orderNames(array_diff($names, $low[$class] ?? [], $high[$class] ?? [])),
 			]);
 		}
 
@@ -413,6 +413,27 @@ class ContainerBuilder
 		}
 
 		return $meta;
+	}
+
+
+	/**
+	 * Orders service names by their definitions' ordering metadata (priority/before/after)
+	 * via {@see DefinitionOrdering}. A no-op when nothing in the set carries metadata.
+	 * @param  array<string>  $names
+	 * @return list<string>
+	 */
+	private function orderNames(array $names): array
+	{
+		if (count($names) < 2) {
+			return array_values($names);
+		}
+
+		$subset = [];
+		foreach ($names as $name) {
+			$subset[$name] = $this->definitions[$name];
+		}
+
+		return array_keys(DefinitionOrdering::sort($subset));
 	}
 
 
