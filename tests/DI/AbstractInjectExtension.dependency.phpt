@@ -3,7 +3,8 @@
 /**
  * Test: AbstractInjectExtension registers inject-bearing class files as container
  * dependencies, so editing an inject attribute (which the DependencyChecker hash does
- * not capture) invalidates the cached container.
+ * not capture) invalidates the cached container. The inject-bearing class lives in a
+ * separate file so its dependency can't be confused with the always-tracked extension file.
  */
 
 use Nette\DI;
@@ -43,43 +44,28 @@ class ProbeExtension extends AbstractInjectExtension
 	}
 }
 
-class Dep
-{
-}
+require __DIR__ . '/files/injectDependency.php';
 
-class Injected
-{
-	#[ProbeInject]
-	private Dep $dep;
-}
+$fixtureFile = new ReflectionClass(InjectDependencyConsumer::class)->getFileName();
 
-class Plain
-{
-}
+// exportDependencies() returns [version, files, phpFiles, classes, functions, hash];
+// [1] is the mtime-tracked file list.
 
-
-// a class with an inject member → its file is tracked as a dependency
+// the consumer has an inject member → its file is tracked
 $compiler = new DI\Compiler;
 $compiler->addExtension('probe', new ProbeExtension);
 createContainer($compiler, "
 services:
-	dep: Dep
-	injected: Injected
+	dep: InjectDependencyDep
+	consumer: InjectDependencyConsumer
 ");
-Assert::contains(
-	new ReflectionClass(Injected::class)->getFileName(),
-	$compiler->getContainerBuilder()->getDependencies(),
-);
+Assert::true(array_key_exists($fixtureFile, $compiler->exportDependencies()[1]));
 
-
-// a class with no inject members → its file is not added as a (string) dependency
+// only a plain service from the same file is registered → the file is not tracked
 $compiler = new DI\Compiler;
 $compiler->addExtension('probe', new ProbeExtension);
 createContainer($compiler, "
 services:
-	plain: Plain
+	dep: InjectDependencyDep
 ");
-Assert::notContains(
-	new ReflectionClass(Plain::class)->getFileName(),
-	$compiler->getContainerBuilder()->getDependencies(),
-);
+Assert::false(array_key_exists($fixtureFile, $compiler->exportDependencies()[1]));

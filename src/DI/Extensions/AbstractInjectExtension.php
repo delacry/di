@@ -80,13 +80,14 @@ abstract class AbstractInjectExtension extends DI\CompilerExtension
 			return;
 		}
 
-		$builder = $this->getContainerBuilder();
+		$files = [];
 		foreach ([$class, ...array_values(class_parents($class) ?: [])] as $name) {
-			$file = new \ReflectionClass($name)->getFileName();
-			if ($file !== false) {
-				$builder->addDependency($file);
+			if (($file = new \ReflectionClass($name)->getFileName()) !== false) {
+				$files[] = $file;
 			}
 		}
+
+		$this->compiler->addDependencies($files);
 	}
 
 
