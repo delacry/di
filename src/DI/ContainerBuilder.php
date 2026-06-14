@@ -248,7 +248,7 @@ class ContainerBuilder
 	public function findAutowired(string $type): array
 	{
 		$this->needResolved();
-		return $this->autowiring->findByType($type);
+		return DefinitionOrdering::sort($this->autowiring->findByType($type));
 	}
 
 
@@ -268,7 +268,7 @@ class ContainerBuilder
 			}
 		}
 
-		return $found;
+		return DefinitionOrdering::sort($found);
 	}
 
 

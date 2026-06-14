@@ -36,6 +36,15 @@ abstract class Definition
 	/** @var array<string, mixed> */
 	private array $tags = [];
 
+	/** Absolute collection order; higher first, null = unspecified (treated as 0). */
+	private ?int $priority = null;
+
+	/** @var list<class-string> collected before services matching these types */
+	private array $before = [];
+
+	/** @var list<class-string> collected after services matching these types */
+	private array $after = [];
+
 	/** @var bool|class-string[] */
 	private bool|array $autowired = true;
 
@@ -112,6 +121,62 @@ abstract class Definition
 	{
 		$this->tags[$tag] = $attr;
 		return $this;
+	}
+
+
+	/**
+	 * Sets the absolute collection order; higher is collected first, null leaves it
+	 * unspecified. Pure ordering metadata read when an autowired collection of this
+	 * service's type is assembled — like tags, the container decides what it means.
+	 */
+	final public function setPriority(?int $priority): static
+	{
+		$this->priority = $priority;
+		return $this;
+	}
+
+
+	final public function getPriority(): ?int
+	{
+		return $this->priority;
+	}
+
+
+	/**
+	 * Declares relative collection order: this service is collected before every
+	 * collected service whose type is-a one of $before. Edges in a topological sort.
+	 * @param  list<class-string>  $before
+	 */
+	final public function setBefore(array $before): static
+	{
+		$this->before = $before;
+		return $this;
+	}
+
+
+	/** @return list<class-string> */
+	final public function getBefore(): array
+	{
+		return $this->before;
+	}
+
+
+	/**
+	 * Declares relative collection order: this service is collected after every
+	 * collected service whose type is-a one of $after.
+	 * @param  list<class-string>  $after
+	 */
+	final public function setAfter(array $after): static
+	{
+		$this->after = $after;
+		return $this;
+	}
+
+
+	/** @return list<class-string> */
+	final public function getAfter(): array
+	{
+		return $this->after;
 	}
 
 
