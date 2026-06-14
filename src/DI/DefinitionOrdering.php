@@ -12,15 +12,10 @@ use function array_filter, array_keys, array_map, array_values, count, implode, 
 
 
 /**
- * Deterministically orders a set of service definitions for collection autowiring,
- * reading the ordering metadata each Definition carries (priority + before/after).
- *
- * before/after are hard constraints resolved by a topological sort; priority (desc),
- * then type FQCN, then service name break ties among otherwise-unordered services.
- * A set in which nothing carries ordering metadata is returned untouched (so services
- * that opt out keep their existing order). before/after references that match nothing
- * in the set are ignored (soft — relative ordering against optional services); a
- * genuine cycle throws.
+ * Deterministically orders service definitions for collection autowiring from the
+ * ordering metadata each carries: before/after as a topological sort, priority (desc)
+ * then type FQCN then name breaking ties. A set with no metadata is returned unchanged;
+ * before/after references matching nothing in the set are ignored; a cycle throws.
  */
 final class DefinitionOrdering
 {

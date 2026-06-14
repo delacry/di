@@ -126,8 +126,7 @@ abstract class Definition
 
 	/**
 	 * Sets the absolute collection order; higher is collected first, null leaves it
-	 * unspecified. Pure ordering metadata read when an autowired collection of this
-	 * service's type is assembled — like tags, the container decides what it means.
+	 * unspecified. Read when an autowired collection of this type is assembled.
 	 */
 	final public function setPriority(?int $priority): static
 	{
@@ -143,8 +142,7 @@ abstract class Definition
 
 
 	/**
-	 * Declares relative collection order: this service is collected before every
-	 * collected service whose type is-a one of $before. Edges in a topological sort.
+	 * Declares relative order: collected before every service whose type is-a one of $before.
 	 * @param  list<class-string>  $before
 	 */
 	final public function setBefore(array $before): static
@@ -162,8 +160,7 @@ abstract class Definition
 
 
 	/**
-	 * Declares relative collection order: this service is collected after every
-	 * collected service whose type is-a one of $after.
+	 * Declares relative order: collected after every service whose type is-a one of $after.
 	 * @param  list<class-string>  $after
 	 */
 	final public function setAfter(array $after): static

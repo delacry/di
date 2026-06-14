@@ -11,7 +11,7 @@ use Nette;
 use Nette\DI;
 use Nette\DI\Definitions;
 use Nette\Utils\Reflection;
-use function array_keys, array_reverse, array_search, array_unshift, get_class_methods, is_a, is_subclass_of, ksort, sprintf, str_starts_with, uksort;
+use function array_keys, array_reverse, array_search, array_unshift, array_values, class_parents, get_class_methods, is_a, is_subclass_of, ksort, sprintf, str_starts_with, uksort;
 
 
 /**
@@ -61,7 +61,50 @@ abstract class AbstractInjectExtension extends DI\CompilerExtension
 			if ($this->shouldInjectMembers($def, $class)) {
 				$this->updateDefinition($target, $class);
 			}
+
+			/** @var class-string $class */
+			$this->trackInjectDependency($class);
 		}
+	}
+
+
+	/**
+	 * Registers the class file (and its parents', for inherited non-public members) as a
+	 * dependency, so edits to inject attributes invalidate the cached container — the
+	 * DependencyChecker's structural hash doesn't track them.
+	 * @param  class-string  $class
+	 */
+	private function trackInjectDependency(string $class): void
+	{
+		if (!$this->injectsAnything($class)) {
+			return;
+		}
+
+		$builder = $this->getContainerBuilder();
+		foreach ([$class, ...array_values(class_parents($class) ?: [])] as $name) {
+			$file = new \ReflectionClass($name)->getFileName();
+			if ($file !== false) {
+				$builder->addDependency($file);
+			}
+		}
+	}
+
+
+	/** @param  class-string  $class */
+	private function injectsAnything(string $class): bool
+	{
+		if (static::resolveInjectProperties($class) !== [] || static::getInjectMethods($class) !== []) {
+			return true;
+		}
+
+		$ctor = new \ReflectionClass($class)->getConstructor();
+		foreach ($ctor?->getParameters() ?? [] as $param) {
+			if ($param->getAttributes(static::injectAttribute()) !== []) {
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 

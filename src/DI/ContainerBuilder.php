@@ -417,8 +417,7 @@ class ContainerBuilder
 
 
 	/**
-	 * Orders service names by their definitions' ordering metadata (priority/before/after)
-	 * via {@see DefinitionOrdering}. A no-op when nothing in the set carries metadata.
+	 * Orders service names via {@see DefinitionOrdering}; a no-op without ordering metadata.
 	 * @param  array<string>  $names
 	 * @return list<string>
 	 */
