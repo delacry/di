@@ -4,7 +4,7 @@ A fork of [nette/di](https://github.com/nette/di) that adds **tag-based dependen
 
 ## Why this fork exists
 
-[nette/di#321](https://github.com/nette/di/pull/321) - *InjectExtension: added support for injecting services by tags* - has been open against upstream since May 2025 with no movement. This fork picks the feature up, ships it, and extends the model further: a first-class identity tag on every service definition, a new canonical `Container::get()` lookup, NEON `@Type#tag` reference syntax, an O(1) precomputed `(type, tag)` index on the compiled container, and deterministic ordering of autowired collections via per-definition `priority`/`before`/`after`.
+[nette/di#321](https://github.com/nette/di/pull/321) - *InjectExtension: added support for injecting services by tags* - has been open against upstream since May 2025 with no movement. This fork picks the feature up, ships it, and extends the model further: a first-class identity tag on every service definition, a new canonical `Container::get()` lookup, NEON `@Type#tag` reference syntax, an O(1) precomputed `(type, tag)` index on the compiled container, deterministic ordering of autowired collections via per-definition `priority`/`before`/`after`, and priority-ordered service decoration (onion chains).
 
 For everything else about Nette DI - service definitions, factories, decorators, NEON syntax, autowiring rules, extension authoring - see [nette/di's documentation](https://doc.nette.org/dependency-injection). All of it works the same here. This README only covers what's different.
 
@@ -162,6 +162,87 @@ Rules:
 
 These are storage-only primitives: the engine reads them, but never sets them itself. A higher layer (e.g. an attribute-driven compiler pass) decides what they mean and calls the setters - the same division of labour as the multi-key `tags:` bag.
 
+### Service decoration: priority-ordered onion chains
+
+A *decorator* implements the same type as the service it wraps, receives the inner instance as a constructor argument, and takes over that service's slot for autowiring. `Definition::decorate()` declares the relationship:
+
+```php
+$builder->addDefinition()
+    ->setType(App\Cache\RedisCache::class);
+
+$builder->addDefinition()
+    ->setType(App\Cache\LoggingCache::class)   // also implements CacheInterface
+    ->decorate(CacheInterface::class);      // wrap whatever serves CacheInterface
+```
+
+Now `get(CacheInterface::class)` returns the `LoggingCache`, constructed with the `RedisCache` as its `CacheInterface` argument. The wrapped service stays registered but no longer wins autowiring.
+
+Several decorators of one slot stack into an onion ordered by decoration **priority - highest is outermost** (the layer consumers receive):
+
+```php
+$builder->addDefinition()->setType(TimingCache::class)
+    ->decorate(CacheInterface::class, priority: 100);   // outermost
+$builder->addDefinition()->setType(LoggingCache::class)
+    ->decorate(CacheInterface::class, priority: 0);     // inner
+
+// get(CacheInterface::class) === TimingCache → LoggingCache → RedisCache
+```
+
+This decoration priority is its **own axis**, separate from the collection `priority` above - it orders the onion, not collection membership, so a deeply nested decorator never shifts where the service sorts in an `array<string, T>` / `list<T>` collection.
+
+#### Decorating a tagged slot
+
+`decorate($type, $tag)` wraps one `(type, tag)` identity, leaving the other tagged services of that type alone:
+
+```php
+$builder->addDefinition()->setType(RedisCache::class)->setTag('fast');
+$builder->addDefinition()->setType(FileSystemCache::class)->setTag('slow');
+
+$builder->addDefinition()->setType(AuditedCache::class)
+    ->decorate(CacheInterface::class, 'fast');
+
+$container->get(CacheInterface::class, 'fast'); // AuditedCache wrapping RedisCache
+$container->get(CacheInterface::class, 'slow'); // FileSystemCache, untouched
+```
+
+The outermost wrapper inherits the slot's identity tag, so `get($type, $tag)` transparently returns the chain. Because a definition carries a single identity tag, all of one definition's `decorate()` targets must share one tag.
+
+#### Decorating several types at once
+
+A decorator implementing more than one interface wraps each by calling `decorate()` per type - handy when one underlying service fills several roles:
+
+```php
+$builder->addDefinition()->setType(FileIo::class);       // implements Reader, Writer
+$builder->addDefinition()->setType(TracingIo::class)     // implements Reader, Writer
+    ->decorate(Reader::class)
+    ->decorate(Writer::class);
+// get(Reader::class) and get(Writer::class) both return the one TracingIo, which
+// receives the single FileIo through a `Reader&Writer` constructor parameter.
+```
+
+#### Which constructor parameter receives the inner
+
+The weaver injects the inner into the parameter **already bound to the slot's service** - by a NEON `@Type#tag` argument, or by an extension that resolved a tagged parameter (e.g. `#[Inject(tag:)]`) into a `Reference`:
+
+```php
+final class AuditedCache implements CacheInterface
+{
+    public function __construct(
+        #[Inject(tag: 'metrics')] private CacheInterface $metrics, // a collaborator, left alone
+        #[Inject(tag: 'fast')]    private CacheInterface $inner,   // the decorated 'fast' slot
+    ) {}
+}
+```
+
+If no parameter is pre-bound to the slot, the first unbound parameter whose type the inner satisfies is used (an exact match on the decorated type ahead of a supertype or intersection). The weaver reads the **resolved argument**, not the attribute - so `#[Inject]`, any injection attribute a downstream extension resolves, or a plain NEON reference all produce the same `Reference` it reads, and the engine never has to know about the attribute.
+
+#### Mechanics
+
+- Chains are woven by `Nette\DI\Decoration` during `ContainerBuilder::complete()`; `get()` / `getByType()` / autowiring all see only the outermost wrapper.
+- The wrapped base and any buried decorators are dropped from autowiring (still registered, referenced internally by the chain); a head that is itself wrapped in another slot is autowiring-restricted to the types it heads, so it can't win a slot it sits inside.
+- Decorating a type with no base service - or with more than one base in the slot - throws `ServiceCreationException` at compile time.
+- Like `priority`/`before`/`after`, `decorate()` is a storage-only primitive: the engine reads it, a higher layer (e.g. an `#[AsDecorator]` compiler pass) sets it.
+
 ## What's removed
 
 - Legacy `@inject` docblock annotation fallback in `InjectExtension` (use the `#[Inject]` attribute)
@@ -192,7 +273,7 @@ Tag-aware features and the ordering primitives are strictly additive. Calling co
 
 - Based on upstream `nette/di` v3.3 (commit `d16957a`).
 - Not tracking upstream - upstream branches force-push, so changes from upstream are cherry-picked when needed.
-- Tests: 178 pass (was 157 on the v3.3 baseline; the tag features, the `array<string, T>` bag autowire, and deterministic collection ordering are the additions).
+- Tests: 182 pass (was 157 on the v3.3 baseline; the tag features, the `array<string, T>` bag autowire, deterministic collection ordering, and service decoration are the additions).
 - **PHP requirement: 8.4 – 8.5** (bumped from upstream's 8.2 – 8.5; the fork uses asymmetric property visibility for `Definition::$tag` and other 8.4-only conveniences). If you need 8.2 or 8.3 compatibility, stay on upstream `nette/di`.
 
 ## Documentation

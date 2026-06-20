@@ -27,7 +27,8 @@ abstract class Definition
 	 * go through the validated path. For the "always a string" view that falls back to
 	 * DefaultTag when null, use getTag() instead.
 	 */
-	public private(set) ?string $tag = null;
+	private(set) ?string $tag = null;
+
 	private ?string $name = null;
 
 	/** @var class-string|null */
@@ -44,6 +45,9 @@ abstract class Definition
 
 	/** @var list<class-string> collected after services matching these types */
 	private array $after = [];
+
+	/** @var list<array{type: class-string, tag: ?string, priority: int}> the (type, tag) slots this service decorates */
+	private array $decorated = [];
 
 	/** @var bool|class-string[] */
 	private bool|array $autowired = true;
@@ -174,6 +178,55 @@ abstract class Definition
 	final public function getAfter(): array
 	{
 		return $this->after;
+	}
+
+
+	/**
+	 * Declares that this service decorates the ($type, $tag) slot: it implements $type, gets
+	 * the inner injected as a constructor argument, and takes the slot over for autowiring.
+	 * Repeated calls stack an onion ordered by $priority (highest outermost) and let one
+	 * service decorate several types. Woven by ContainerBuilder during complete().
+	 *
+	 * All targets of one definition must share an identity tag — a definition has a single
+	 * tag, which the outermost wrapper inherits to own the slot.
+	 *
+	 * @param  class-string  $type
+	 */
+	final public function decorate(string $type, ?string $tag = null, int $priority = 0): static
+	{
+		if (!class_exists($type) && !interface_exists($type)) {
+			throw new Nette\InvalidArgumentException(sprintf(
+				"Service '%s': decorated class or interface '%s' not found.",
+				$this->name,
+				$type,
+			));
+		}
+
+		foreach ($this->decorated as $target) {
+			if ($target['tag'] !== $tag) {
+				throw new Nette\InvalidStateException(sprintf(
+					"Service '%s': all decorated targets must use the same identity tag, got '%s' and '%s'.",
+					$this->name,
+					$target['tag'] ?? self::DefaultTag,
+					$tag ?? self::DefaultTag,
+				));
+			}
+		}
+
+		$this->decorated[] = [
+			'type' => Nette\DI\Helpers::normalizeClass($type),
+			'tag' => $tag,
+			'priority' => $priority,
+		];
+
+		return $this;
+	}
+
+
+	/** @return list<array{type: class-string, tag: ?string, priority: int}> */
+	final public function getDecorated(): array
+	{
+		return $this->decorated;
 	}
 
 

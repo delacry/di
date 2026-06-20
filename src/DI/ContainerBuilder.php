@@ -330,6 +330,11 @@ class ContainerBuilder
 	public function complete(): void
 	{
 		$this->resolve();
+		Decoration::apply($this);
+		if ($this->needsResolve) { // decoration rewired autowiring; rebuild the index before completing
+			$this->resolve();
+		}
+
 		foreach ($this->definitions as $def) {
 			$def->setNotifier(null);
 		}
