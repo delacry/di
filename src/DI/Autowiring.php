@@ -187,6 +187,10 @@ class Autowiring
 							break;
 						}
 					}
+
+					if (!$priority) {
+						continue; // restrict: not autowired for a type outside its declared set — excluded, not a low-priority fallback (so it never leaks into a collection or tagged map for that type)
+					}
 				} else {
 					$priority = empty($preferred[$parent]);
 				}

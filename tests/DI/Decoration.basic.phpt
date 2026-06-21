@@ -212,6 +212,45 @@ test('buried in one slot, outermost in another', function () {
 });
 
 
+// a narrower decorator (implements only one of the base's interfaces) leaves the base
+// reachable by the types the decorator does NOT implement — and by its concrete class
+test('surgical burial keeps the base autowired for undecorated types', function () {
+	$builder = new DI\ContainerBuilder;
+	$builder->addDefinition('io')->setType(BaseIo::class); // implements Reader + Writer
+	$builder->addDefinition('audit')->setType(AuditWriter::class)->decorate(Writer::class); // implements Writer only
+
+	$container = createContainer($builder);
+
+	// Writer slot is decorated: the wrapper answers it.
+	Assert::type(AuditWriter::class, $container->getByType(Writer::class));
+	Assert::same('w#', $container->getByType(Writer::class)->write());
+
+	// Reader is NOT implemented by the decorator, so the base still answers it
+	// (under total burial this would throw "not autowired").
+	Assert::type(BaseIo::class, $container->getByType(Reader::class));
+
+	// And the base is still reachable by its concrete class.
+	Assert::type(BaseIo::class, $container->getByType(BaseIo::class));
+});
+
+
+// a non-autowired service of the same type + identity tag is not a decoration base —
+// it coexists with the decorated (autowired) one rather than causing "multiple base"
+test('non-autowired same-type service is not a base', function () {
+	$builder = new DI\ContainerBuilder;
+	$builder->addDefinition('app')->setType(BaseGreeter::class);
+	$builder->addDefinition('internal')->setType(BaseGreeter::class)->setAutowired(false); // private, by-name only
+	$builder->addDefinition('exclaim')->setType(ExclaimGreeter::class)->decorate(Greeter::class);
+
+	$container = createContainer($builder);
+
+	// The autowired 'app' base is wrapped; 'internal' is untouched and still reachable by name.
+	Assert::type(ExclaimGreeter::class, $container->getByType(Greeter::class));
+	Assert::same('base!', $container->getByType(Greeter::class)->greet());
+	Assert::type(BaseGreeter::class, $container->getService('internal'));
+});
+
+
 // the inner is the param resolved to the slot's service (as an extension or NEON sets it);
 // a param bound to a different service is left untouched
 test('redirects the param bound to the slot', function () {

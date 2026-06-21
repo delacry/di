@@ -46,7 +46,7 @@ abstract class Definition
 	/** @var list<class-string> collected after services matching these types */
 	private array $after = [];
 
-	/** @var list<array{type: class-string, tag: ?string, priority: int}> the (type, tag) slots this service decorates */
+	/** @var list<array{type: class-string, tag: ?string, priority: int, optional: bool}> the (type, tag) slots this service decorates */
 	private array $decorated = [];
 
 	/** @var bool|class-string[] */
@@ -190,9 +190,14 @@ abstract class Definition
 	 * All targets of one definition must share an identity tag — a definition has a single
 	 * tag, which the outermost wrapper inherits to own the slot.
 	 *
+	 * With $optional, a slot whose base is absent at weave time is skipped and this decorator
+	 * dropped, instead of failing the compile — for decorating a soft-dependency service that
+	 * may not be wired. A slot is only skippable when every decorator targeting it is optional;
+	 * one required decorator keeps the missing-base error.
+	 *
 	 * @param  class-string  $type
 	 */
-	final public function decorate(string $type, ?string $tag = null, int $priority = 0): static
+	final public function decorate(string $type, ?string $tag = null, int $priority = 0, bool $optional = false): static
 	{
 		if (!class_exists($type) && !interface_exists($type)) {
 			throw new Nette\InvalidArgumentException(sprintf(
@@ -217,13 +222,14 @@ abstract class Definition
 			'type' => Nette\DI\Helpers::normalizeClass($type),
 			'tag' => $tag,
 			'priority' => $priority,
+			'optional' => $optional,
 		];
 
 		return $this;
 	}
 
 
-	/** @return list<array{type: class-string, tag: ?string, priority: int}> */
+	/** @return list<array{type: class-string, tag: ?string, priority: int, optional: bool}> */
 	final public function getDecorated(): array
 	{
 		return $this->decorated;

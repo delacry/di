@@ -14,7 +14,7 @@ use ReflectionClass;
 use ReflectionIntersectionType;
 use ReflectionNamedType;
 use ReflectionType;
-use function array_keys, count, implode, is_a, sprintf, strcmp, usort;
+use function array_diff, array_keys, array_values, class_implements, class_parents, count, implode, is_a, sprintf, strcmp, usort;
 
 
 /**
@@ -32,13 +32,14 @@ final class Decoration
 	{
 		$definitions = $builder->getDefinitions();
 
-		/** @var array<string, array{type: class-string, tag: ?string, decorators: list<array{name: string, priority: int}>}> $slots */
+		/** @var array<string, array{type: class-string, tag: ?string, optional: bool, decorators: list<array{name: string, priority: int}>}> $slots */
 		$slots = [];
 		foreach ($definitions as $name => $def) {
 			foreach ($def->getDecorated() as $target) {
 				$key = $target['type'] . "\0" . ($target['tag'] ?? '');
 				$slots[$key]['type'] = $target['type'];
 				$slots[$key]['tag'] = $target['tag'];
+				$slots[$key]['optional'] = ($slots[$key]['optional'] ?? true) && $target['optional'];
 				$slots[$key]['decorators'][] = ['name' => $name, 'priority' => $target['priority']];
 			}
 		}
@@ -56,14 +57,20 @@ final class Decoration
 		/** @var array<string, true> $buried  decorator names wrapped by another in some slot */
 		$buried = [];
 
-		/** @var array<string, true> $bases  base service names to drop from autowiring */
+		/** @var array<string, true> $bases  base service names whose autowiring is narrowed */
 		$bases = [];
+
+		/** @var array<string, list<string>> $baseHeads  base name => outermost decorator name per slot it is decorated in */
+		$baseHeads = [];
 
 		/** @var list<array{outer: ServiceDefinition, param: string, inner: string}> $wiring */
 		$wiring = [];
 
 		/** @var array<string, array<string, string>> $assigned  decorator name => param => inner already wired there */
 		$assigned = [];
+
+		/** @var array<string, true> $names  decorator names of woven (non-skipped) slots */
+		$names = [];
 
 		foreach ($slots as $slot) {
 			$type = $slot['type'];
@@ -75,7 +82,21 @@ final class Decoration
 				static fn(array $a, array $b): int => ($b['priority'] <=> $a['priority']) ?: strcmp($a['name'], $b['name']),
 			);
 
-			$base = self::findBase($definitions, $type, $tag);
+			$base = self::findBase($definitions, $type, $tag, $slot['optional']);
+			if ($base === null) {
+				// Optional slot with no base to wrap: drop its decorators (their inner
+				// argument can never resolve) and leave the slot alone.
+				foreach ($decorators as $decorator) {
+					$builder->removeDefinition($decorator['name']);
+					unset($definitions[$decorator['name']]);
+				}
+
+				continue;
+			}
+
+			foreach ($decorators as $decorator) {
+				$names[$decorator['name']] = true;
+			}
 
 			$chain = [];
 			foreach ($decorators as $decorator) {
@@ -108,16 +129,31 @@ final class Decoration
 			$heads[$head][] = $type;
 			$headTag[$head] = $tag;
 			$bases[$base] = true;
+			$baseHeads[$base][] = $head;
+
+			// Decoration is transparent to collection ordering: the outermost
+			// wrapper stands in for the base wherever it is collected (an
+			// @param list<T>), so it inherits the base's collection priority /
+			// before / after. That is a separate axis from decoration priority
+			// (which only orders the onion), so wrapping a service never moves
+			// it within a collection. A decorator that sets its own collection
+			// priority keeps it.
+			$baseDef = $definitions[$base];
+			$headDef = $definitions[$head];
+			if ($headDef->getPriority() === null) {
+				$headDef->setPriority($baseDef->getPriority());
+			}
+
+			if ($headDef->getBefore() === []) {
+				$headDef->setBefore($baseDef->getBefore());
+			}
+
+			if ($headDef->getAfter() === []) {
+				$headDef->setAfter($baseDef->getAfter());
+			}
 
 			for ($j = 1, $last = count($chain) - 1; $j < $last; $j++) {
 				$buried[$chain[$j]] = true;
-			}
-		}
-
-		$names = [];
-		foreach ($slots as $slot) {
-			foreach ($slot['decorators'] as $decorator) {
-				$names[$decorator['name']] = true;
 			}
 		}
 
@@ -131,8 +167,35 @@ final class Decoration
 			}
 		}
 
+		// Surgical burial: a base yields only the types its decorator(s) actually
+		// stand in for — the closure of types the outermost wrapper implements. It
+		// stays autowired for everything else (its concrete class, sibling interfaces
+		// the decorator does NOT implement), so a decorator narrower than its base
+		// never breaks a consumer that asked for one of those other types. A full
+		// drop-in decorator (implements everything the base does) surrenders the whole
+		// closure → setAutowired(false), exactly as before. (A head that is low-priority
+		// for a surrendered type is, by construction, buried behind another head that is
+		// high-priority for it, so over-surrendering never orphans a type.)
 		foreach (array_keys($bases) as $name) {
-			$definitions[$name]->setAutowired(false);
+			$base = $definitions[$name];
+			$baseType = $base->getType();
+
+			if ($baseType === null) {
+				$base->setAutowired(false);
+
+				continue;
+			}
+
+			$surrendered = [];
+			foreach ($baseHeads[$name] ?? [] as $headName) {
+				$headType = $definitions[$headName]->getType();
+				if ($headType !== null) {
+					$surrendered += self::typeClosure($headType);
+				}
+			}
+
+			$kept = array_values(array_diff(self::typeClosure($baseType), $surrendered));
+			$base->setAutowired($kept === [] ? false : $kept);
 		}
 
 		foreach ($wiring as $wire) {
@@ -149,12 +212,18 @@ final class Decoration
 
 	/**
 	 * The single non-decorator service carrying the slot's identity tag — the innermost
-	 * layer the onion wraps.
+	 * layer the onion wraps. Returns null (rather than throwing on a missing base) when the
+	 * slot is $optional, so the caller can drop an optional decorator whose base is absent.
+	 *
+	 * Non-autowired services (`setAutowired(false)`) are skipped: a service excluded from
+	 * autowiring does not answer the (type, tag) slot, so it is not a base for it — this
+	 * lets an internal, by-name-only service of the same type+tag coexist with a decorated
+	 * one (e.g. a template engine's private cache pool alongside the app's default pool).
 	 *
 	 * @param  array<string, Definition>  $definitions
 	 * @param  class-string  $type
 	 */
-	private static function findBase(array $definitions, string $type, ?string $tag): string
+	private static function findBase(array $definitions, string $type, ?string $tag, bool $optional): ?string
 	{
 		$identityTag = $tag ?? Definition::DefaultTag;
 		$found = [];
@@ -162,6 +231,7 @@ final class Decoration
 			$candidate = $def->getType();
 			if (
 				$candidate !== null
+				&& $def->getAutowired() !== false
 				&& is_a($candidate, $type, allow_string: true)
 				&& $def->getTag() === $identityTag
 				&& !self::decoratesType($def, $type)
@@ -171,6 +241,10 @@ final class Decoration
 		}
 
 		if ($found === []) {
+			if ($optional) {
+				return null;
+			}
+
 			throw new ServiceCreationException(sprintf(
 				'No base service of type %s%s found to decorate.',
 				$type,
@@ -188,6 +262,18 @@ final class Decoration
 		}
 
 		return $found[0];
+	}
+
+
+	/**
+	 * Every type a class is autowirable as: itself, its parents, and its interfaces.
+	 *
+	 * @param  class-string  $type
+	 * @return array<class-string, class-string>
+	 */
+	private static function typeClosure(string $type): array
+	{
+		return class_parents($type) + class_implements($type) + [$type => $type];
 	}
 
 
