@@ -33,5 +33,5 @@ Assert::exception(
 Assert::exception(
 	fn() => $builder->getDefinitionByType(SplFileInfo::class),
 	Nette\DI\ServiceCreationException::class,
-	'Multiple services of type SplFileInfo found: three, two',
+	'Multiple services of type SplFileInfo found: three, two. To replace one, decorate the existing service; to keep both, give one an identity tag.',
 );

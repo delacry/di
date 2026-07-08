@@ -129,6 +129,14 @@ class ForkGreeter implements Greeter
 	}
 }
 
+class ReplacementGreeter implements Greeter
+{
+	public function greet(): string
+	{
+		return 'replaced';
+	}
+}
+
 
 // a single decorator wraps the base
 test('single decorator', function () {
@@ -280,6 +288,22 @@ test('no base service', function () {
 		ServiceCreationException::class,
 		'No base service of type %a% found to decorate.',
 	);
+});
+
+
+// a decorator that ignores the inner replaces the slot entirely (Symfony parity) — the
+// base is buried but still built, reachable by name
+test('decorator without inner param fully replaces the base', function () {
+	$builder = new DI\ContainerBuilder;
+	$builder->addDefinition('app')->setType(BaseGreeter::class);
+	$builder->addDefinition('replacement')->setType(ReplacementGreeter::class)->decorate(Greeter::class);
+
+	$container = createContainer($builder);
+
+	$greeter = $container->getByType(Greeter::class);
+	Assert::type(ReplacementGreeter::class, $greeter);
+	Assert::same('replaced', $greeter->greet());
+	Assert::type(BaseGreeter::class, $container->getService('app')); // base still reachable by name
 });
 
 

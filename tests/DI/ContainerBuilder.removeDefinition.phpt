@@ -39,7 +39,7 @@ $builder->addDefinition('four')
 Assert::exception(
 	fn() => $builder->getByType(stdClass::class),
 	Nette\DI\ServiceCreationException::class,
-	'Multiple services of type stdClass found: four, one, two',
+	'Multiple services of type stdClass found: four, one, two. To replace one, decorate the existing service; to keep both, give one an identity tag.',
 );
 
 Assert::count(4, $builder->findByType(stdClass::class));

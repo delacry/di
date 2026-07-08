@@ -54,7 +54,7 @@ Assert::same('two', $builder->getByType(Service2::class));
 Assert::exception(
 	fn() => $builder->getByType(stdClass::class),
 	Nette\DI\ServiceCreationException::class,
-	'Multiple services of type stdClass found: one, two',
+	'Multiple services of type stdClass found: one, two. To replace one, decorate the existing service; to keep both, give one an identity tag.',
 );
 
 Assert::exception(

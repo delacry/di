@@ -26,19 +26,19 @@ $container = createContainer($builder);
 Assert::exception(
 	fn() => $container->getByType(Service::class),
 	Nette\DI\MissingServiceException::class,
-	'Multiple services of type Service found: one, two.',
+	'Multiple services of type Service found: one, two. To replace one, decorate the existing service; to keep both, give one an identity tag.',
 );
 
 Assert::exception(
 	fn() => $container->getByType(Alias::class),
 	Nette\DI\MissingServiceException::class,
-	'Multiple services of type Service found: one, two.',
+	'Multiple services of type Service found: one, two. To replace one, decorate the existing service; to keep both, give one an identity tag.',
 );
 
 Assert::exception(
 	fn() => $builder->getByType('\service'),
 	Nette\DI\ServiceCreationException::class,
-	'Multiple services of type Service found: one, two',
+	'Multiple services of type Service found: one, two. To replace one, decorate the existing service; to keep both, give one an identity tag.',
 );
 
 

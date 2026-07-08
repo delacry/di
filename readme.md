@@ -236,6 +236,18 @@ final class AuditedCache implements CacheInterface
 
 If no parameter is pre-bound to the slot, the first unbound parameter whose type the inner satisfies is used (an exact match on the decorated type ahead of a supertype or intersection). The weaver reads the **resolved argument**, not the attribute - so `#[Inject]`, any injection attribute a downstream extension resolves, or a plain NEON reference all produce the same `Reference` it reads, and the engine never has to know about the attribute.
 
+#### Ignoring the inner = full replacement
+
+A decorator that has **no parameter accepting the inner** (or no constructor at all) *replaces* the slot instead of wrapping it: the base is still buried and the decorator answers the (type, tag) slot, but nothing is wired into it. This mirrors Symfony, where ignoring the decorated service is a complete replacement - the clean way to swap a framework service for your own without registering a second service of the same type (which would make the slot ambiguous):
+
+```php
+// takes over CacheInterface entirely; never touches the previous implementation
+final class MyCache implements CacheInterface
+{
+    public function __construct(private Clock $clock) {}   // no CacheInterface param
+}
+```
+
 #### Mechanics
 
 - Chains are woven by `Nette\DI\Decoration` during `ContainerBuilder::complete()`; `get()` / `getByType()` / autowiring all see only the outermost wrapper.

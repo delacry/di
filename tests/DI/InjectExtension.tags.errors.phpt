@@ -105,5 +105,5 @@ services:
 ');
 	},
 	DI\ServiceCreationException::class,
-	"Multiple services of type IServiceE with tag 'sharedTag' found: a, b",
+	"Multiple services of type IServiceE with tag 'sharedTag' found: a, b. To replace one, decorate the existing service; to keep both, give one an identity tag.",
 );

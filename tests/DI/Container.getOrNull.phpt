@@ -61,7 +61,7 @@ services:
 Assert::exception(
 	fn() => $container->getOrNull(IGON::class, 'shared'),
 	DI\MissingServiceException::class,
-	"Multiple services of type IGON with tag 'shared' found: blue, red.",
+	"Multiple services of type IGON with tag 'shared' found: blue, red. To replace one, decorate the existing service; to keep both, give one an identity tag.",
 );
 
 // Untagged service (implicit "default" tag) lookups work the same way

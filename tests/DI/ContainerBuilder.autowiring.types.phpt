@@ -208,13 +208,13 @@ test('ambiguous autowiring throws exception for multiple services', function () 
 	Assert::exception(
 		fn() => $builder->getByType(Foo::class),
 		DI\ServiceCreationException::class,
-		'Multiple services of type Foo found: bar, foo',
+		'Multiple services of type Foo found: bar, foo. To replace one, decorate the existing service; to keep both, give one an identity tag.',
 	);
 
 	Assert::exception(
 		fn() => $builder->getByType(IFoo::class),
 		DI\ServiceCreationException::class,
-		'Multiple services of type IFoo found: bar, foo',
+		'Multiple services of type IFoo found: bar, foo. To replace one, decorate the existing service; to keep both, give one an identity tag.',
 	);
 });
 

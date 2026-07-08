@@ -199,7 +199,7 @@ services:
 	b: stdClass
 	bad: ConstructorParam
 ');
-}, Nette\DI\ServiceCreationException::class, "Service 'bad' (type of ConstructorParam): Multiple services of type stdClass found: a, b (required by \$x in ConstructorParam::__construct())");
+}, Nette\DI\ServiceCreationException::class, "Service 'bad' (type of ConstructorParam): Multiple services of type stdClass found: a, b. To replace one, decorate the existing service; to keep both, give one an identity tag. (required by \$x in ConstructorParam::__construct())");
 
 
 testException('ambiguous constructor dependency via argument reference', function () {
@@ -209,7 +209,7 @@ services:
 	b: stdClass
 	bad: ConstructorParam(@\stdClass)
 ');
-}, Nette\DI\ServiceCreationException::class, "Service 'bad' (type of ConstructorParam): Multiple services of type stdClass found: a, b (used in ConstructorParam::__construct())");
+}, Nette\DI\ServiceCreationException::class, "Service 'bad' (type of ConstructorParam): Multiple services of type stdClass found: a, b. To replace one, decorate the existing service; to keep both, give one an identity tag. (used in ConstructorParam::__construct())");
 
 
 testException('ambiguous method parameter dependency triggers error', function () {
@@ -219,7 +219,7 @@ services:
 	b: stdClass
 	bad: MethodParam()::foo()
 ');
-}, Nette\DI\ServiceCreationException::class, "Service 'bad' (type of MethodParam): Multiple services of type stdClass found: a, b (required by \$x in MethodParam::foo())");
+}, Nette\DI\ServiceCreationException::class, "Service 'bad' (type of MethodParam): Multiple services of type stdClass found: a, b. To replace one, decorate the existing service; to keep both, give one an identity tag. (required by \$x in MethodParam::foo())");
 
 
 testException('ambiguous dependency in method call triggers error', function () {
@@ -229,7 +229,7 @@ services:
 	b: stdClass
 	bad: MethodParam()::foo(@\stdClass)
 ');
-}, Nette\DI\ServiceCreationException::class, "Service 'bad' (type of MethodParam): Multiple services of type stdClass found: a, b (used in foo())");
+}, Nette\DI\ServiceCreationException::class, "Service 'bad' (type of MethodParam): Multiple services of type stdClass found: a, b. To replace one, decorate the existing service; to keep both, give one an identity tag. (used in foo())");
 
 
 testException('multiple services in constructor dependency cause ambiguity', function () {
@@ -239,7 +239,7 @@ services:
 	b: stdClass
 	bad: Good(ConstructorParam())
 ');
-}, Nette\DI\ServiceCreationException::class, "Service 'bad' (type of Good): Multiple services of type stdClass found: a, b (required by \$x in ConstructorParam::__construct()) (used in Good::__construct())");
+}, Nette\DI\ServiceCreationException::class, "Service 'bad' (type of Good): Multiple services of type stdClass found: a, b. To replace one, decorate the existing service; to keep both, give one an identity tag. (required by \$x in ConstructorParam::__construct()) (used in Good::__construct())");
 
 
 testException('ambiguous dependency in constructor argument triggers error', function () {
@@ -249,7 +249,7 @@ services:
 	b: stdClass
 	bad: Good(ConstructorParam(@\stdClass))
 ');
-}, Nette\DI\ServiceCreationException::class, "Service 'bad' (type of Good): Multiple services of type stdClass found: a, b (used in ConstructorParam::__construct())");
+}, Nette\DI\ServiceCreationException::class, "Service 'bad' (type of Good): Multiple services of type stdClass found: a, b. To replace one, decorate the existing service; to keep both, give one an identity tag. (used in ConstructorParam::__construct())");
 
 
 testException('ambiguous dependency in method parameter causes error', function () {
@@ -259,7 +259,7 @@ services:
 	b: stdClass
 	bad: Good(MethodParam()::foo())
 ');
-}, Nette\DI\ServiceCreationException::class, "Service 'bad' (type of Good): Multiple services of type stdClass found: a, b (required by \$x in MethodParam::foo()) (used in Good::__construct())");
+}, Nette\DI\ServiceCreationException::class, "Service 'bad' (type of Good): Multiple services of type stdClass found: a, b. To replace one, decorate the existing service; to keep both, give one an identity tag. (required by \$x in MethodParam::foo()) (used in Good::__construct())");
 
 
 testException('ambiguous dependency in method call triggers error', function () {
@@ -269,7 +269,7 @@ services:
 	b: stdClass
 	bad: Good(MethodParam()::foo(@\stdClass))
 ');
-}, Nette\DI\ServiceCreationException::class, "Service 'bad' (type of Good): Multiple services of type stdClass found: a, b (used in foo())");
+}, Nette\DI\ServiceCreationException::class, "Service 'bad' (type of Good): Multiple services of type stdClass found: a, b. To replace one, decorate the existing service; to keep both, give one an identity tag. (used in foo())");
 
 
 testException('ambiguous dependency in property setup triggers error', function () {
@@ -282,7 +282,7 @@ services:
 		setup:
 			- $a = @\stdClass
 ');
-}, Nette\DI\ServiceCreationException::class, "Service 'bad' (type of Good): Multiple services of type stdClass found: a, b (used in @bad::\$a)");
+}, Nette\DI\ServiceCreationException::class, "Service 'bad' (type of Good): Multiple services of type stdClass found: a, b. To replace one, decorate the existing service; to keep both, give one an identity tag. (used in @bad::\$a)");
 
 
 testException('ambiguous dependency in method setup triggers error', function () {
@@ -295,7 +295,7 @@ services:
 		setup:
 			- $a = MethodParam()::foo(@\stdClass)
 ');
-}, Nette\DI\ServiceCreationException::class, "Service 'bad' (type of Good): Multiple services of type stdClass found: a, b (used in foo())");
+}, Nette\DI\ServiceCreationException::class, "Service 'bad' (type of Good): Multiple services of type stdClass found: a, b. To replace one, decorate the existing service; to keep both, give one an identity tag. (used in foo())");
 
 
 testException('ambiguous dependency in method call during setup triggers error', function () {
@@ -308,7 +308,7 @@ services:
 		setup:
 			- foo
 ');
-}, Nette\DI\ServiceCreationException::class, "Service 'bad' (type of MethodParam): Multiple services of type stdClass found: a, b (required by \$x in MethodParam::foo())");
+}, Nette\DI\ServiceCreationException::class, "Service 'bad' (type of MethodParam): Multiple services of type stdClass found: a, b. To replace one, decorate the existing service; to keep both, give one an identity tag. (required by \$x in MethodParam::foo())");
 
 
 testException('ambiguous dependency in method call on service triggers error', function () {
@@ -321,7 +321,7 @@ services:
 		setup:
 			- bar(@\stdClass)
 ');
-}, Nette\DI\ServiceCreationException::class, "Service 'bad' (type of Good): Multiple services of type stdClass found: a, b (used in @bad::bar())");
+}, Nette\DI\ServiceCreationException::class, "Service 'bad' (type of Good): Multiple services of type stdClass found: a, b. To replace one, decorate the existing service; to keep both, give one an identity tag. (used in @bad::bar())");
 
 
 testException('ambiguous dependency in method call setup triggers error', function () {
@@ -334,4 +334,4 @@ services:
 		setup:
 			- bar(MethodParam()::foo(@\stdClass))
 ');
-}, Nette\DI\ServiceCreationException::class, "Service 'bad' (type of Good): Multiple services of type stdClass found: a, b (used in foo())");
+}, Nette\DI\ServiceCreationException::class, "Service 'bad' (type of Good): Multiple services of type stdClass found: a, b. To replace one, decorate the existing service; to keep both, give one an identity tag. (used in foo())");
