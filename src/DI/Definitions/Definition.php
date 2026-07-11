@@ -52,9 +52,6 @@ abstract class Definition
 	/** @var bool|class-string[] */
 	private bool|array $autowired = true;
 
-	/** Never shared: get() refuses the service and Container::create() builds a fresh instance per call. */
-	private bool $transient = false;
-
 	/** @var ?(\Closure(): void) */
 	private ?\Closure $notifier = null;
 
@@ -289,25 +286,6 @@ abstract class Definition
 	final public function getAutowired(): bool|array
 	{
 		return $this->autowired;
-	}
-
-
-	/**
-	 * Marks the service as transient: the container never caches its instance — get() and
-	 * getService() refuse it, and Container::create() builds a fresh, fully-wired instance
-	 * per call. Transient services are withdrawn from autowiring during completion, so a
-	 * shared service can never capture one as a dependency.
-	 */
-	final public function setTransient(bool $state = true): static
-	{
-		$this->transient = $state;
-		return $this;
-	}
-
-
-	final public function isTransient(): bool
-	{
-		return $this->transient;
 	}
 
 

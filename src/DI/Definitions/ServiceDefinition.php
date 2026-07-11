@@ -30,6 +30,9 @@ final class ServiceDefinition extends Definition
 	/** @var Statement[] */
 	private array $setup = [];
 
+	/** Never shared: get() refuses the service and Container::create() builds a fresh instance per call. */
+	private bool $transient = false;
+
 
 	public function __construct()
 	{
@@ -40,6 +43,25 @@ final class ServiceDefinition extends Definition
 	public function setType(?string $type): static
 	{
 		return parent::setType($type);
+	}
+
+
+	/**
+	 * Marks the service as transient: the container never caches its instance — get() and
+	 * getService() refuse it, and Container::create() builds a fresh, fully-wired instance
+	 * per call. Transient services are withdrawn from autowiring during completion, so a
+	 * shared service can never capture one as a dependency.
+	 */
+	public function setTransient(bool $state = true): static
+	{
+		$this->transient = $state;
+		return $this;
+	}
+
+
+	public function isTransient(): bool
+	{
+		return $this->transient;
 	}
 
 

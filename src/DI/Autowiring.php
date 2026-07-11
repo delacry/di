@@ -55,7 +55,7 @@ class Autowiring
 				}
 
 				foreach ($this->builder->getDefinitions() as $def) {
-					if ($def->isTransient() && $def->getType() !== null && is_a($def->getType(), $type, allow_string: true)) {
+					if ($def instanceof Definitions\ServiceDefinition && $def->isTransient() && $def->getType() !== null && is_a($def->getType(), $type, allow_string: true)) {
 						throw new ServiceCreationException(sprintf(
 							'Service of type %s is transient and cannot be autowired into a shared service — inject a factory or use Container::create().',
 							$type,

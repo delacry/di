@@ -447,7 +447,7 @@ class ContainerBuilder
 				$meta['serviceTags'][$name] = $def->getTag();
 			}
 
-			if ($def->isTransient() && ($type = $def->getType()) !== null) {
+			if ($def instanceof Definitions\ServiceDefinition && $def->isTransient() && ($type = $def->getType()) !== null) {
 				$meta['transients'][$name] = $type;
 				$meta['transientsByType'][$type][] = $name;
 			}

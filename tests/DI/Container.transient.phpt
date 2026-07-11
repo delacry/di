@@ -82,6 +82,7 @@ Assert::exception(
 
 // the definition was withdrawn from autowiring during completion
 $def = $compiler->getContainerBuilder()->getDefinition('newsletter');
+Assert::type(DI\Definitions\ServiceDefinition::class, $def);
 Assert::true($def->isTransient());
 Assert::false($def->getAutowired());
 
