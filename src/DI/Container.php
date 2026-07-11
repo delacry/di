@@ -49,6 +49,16 @@ class Container
 	/** @var array<class-string, array<int, list<string>>>  type => (high/low/no => service names) */
 	protected array $wiring = [];
 
+	/**
+	 * Transient services: never cached, getService()/get() refuse them and
+	 * create() builds a fresh instance per call.
+	 * @var array<string, class-string>  service name => type
+	 */
+	protected array $transients = [];
+
+	/** @var array<class-string, list<string>>  transient type => service names, powers create() */
+	protected array $transientsByType = [];
+
 	/** @var object[]  service name => instance */
 	private array $instances = [];
 
@@ -168,6 +178,14 @@ class Container
 		if (!isset($this->instances[$name])) {
 			if (isset($this->aliases[$name])) {
 				return $this->getService($this->aliases[$name]);
+			}
+
+			if (isset($this->transients[$name])) {
+				throw new TransientServiceException(sprintf(
+					"Service '%s' of type %s is transient — the container never shares its instance. Use Container::create() to build a fresh one.",
+					$name,
+					$this->transients[$name],
+				));
 			}
 
 			$this->instances[$name] = $this->createService($name);
@@ -322,6 +340,85 @@ class Container
 
 
 	/**
+	 * Builds a fresh instance of the transient service selected by (type, identity tag) —
+	 * transients are never cached, so each call returns a new, fully-wired object. Untagged
+	 * services are considered tagged with Definition::DefaultTag; with $tag null, ambiguity
+	 * among same-type transients is broken by preferring the "default"-tagged one, matching
+	 * get(). Shared services are refused: use get(), so the container-managed instance stays
+	 * unique.
+	 *
+	 * @template T of object
+	 * @param  class-string<T>  $type
+	 * @return T
+	 * @throws MissingServiceException
+	 * @throws TransientServiceException when the type resolves to a shared service
+	 */
+	public function create(string $type, ?string $tag = null): object
+	{
+		$names = $this->transientsByType[$type]
+			?? $this->transientsByType[Helpers::normalizeClass($type)]
+			?? null;
+
+		if ($names === null) {
+			throw $this->findByType($type) === []
+				? new MissingServiceException(sprintf('Transient service of type %s not found. Did you add it to configuration file?', $type))
+				: new TransientServiceException(sprintf('Service of type %s is shared, not transient — use Container::get() for the container-managed instance.', $type));
+		}
+
+		if ($tag !== null) {
+			$names = array_values(array_filter($names, fn(string $name): bool => ($this->serviceTags[$name] ?? Definition::DefaultTag) === $tag));
+			if ($names === []) {
+				throw new MissingServiceException(sprintf("Transient service of type %s with tag '%s' not found.", $type, $tag));
+			}
+		} elseif (count($names) > 1) {
+			// Multiple transient matches with no explicit tag: prefer the "default"-tagged subset.
+			$defaults = array_values(array_filter($names, fn(string $name): bool => ($this->serviceTags[$name] ?? Definition::DefaultTag) === Definition::DefaultTag));
+			if (count($defaults) === 1) {
+				return $this->createService($defaults[0]);
+			}
+		}
+
+		if (count($names) === 1) {
+			return $this->createService($names[0]);
+		}
+
+		natsort($names);
+		throw new MissingServiceException(sprintf(
+			'Multiple transient services of type %s%s found: %s.',
+			$type,
+			$tag !== null ? sprintf(" with tag '%s'", $tag) : '',
+			implode(', ', $this->describeServices($names, $tag === null)),
+		));
+	}
+
+
+	/**
+	 * Whether a transient service of the given type (and optional identity tag) is
+	 * registered — i.e. whether create() would build one.
+	 */
+	public function hasTransient(string $type, ?string $tag = null): bool
+	{
+		$names = $this->transientsByType[$type]
+			?? $this->transientsByType[Helpers::normalizeClass($type)]
+			?? null;
+
+		if ($names === null) {
+			return false;
+		} elseif ($tag === null) {
+			return true;
+		}
+
+		foreach ($names as $name) {
+			if (($this->serviceTags[$name] ?? Definition::DefaultTag) === $tag) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+
+	/**
 	 * Returns an instance of the autowired service of the given type and optional identity tag.
 	 * If it has not been created yet, it creates it.
 	 * @template T of object
@@ -377,6 +474,8 @@ class Container
 		} elseif ($throw) {
 			if (!class_exists($type) && !interface_exists($type)) {
 				throw new MissingServiceException(sprintf("Service of type '%s' not found. Check the class name because it cannot be found.", $type));
+			} elseif (isset($this->transientsByType[$type])) {
+				throw new TransientServiceException(sprintf('Service of type %s is transient — use Container::create() for a fresh instance.', $type));
 			} elseif ($tag !== null) {
 				throw new MissingServiceException(sprintf("Service of type %s with tag '%s' not found.", $type, $tag));
 			} elseif ($this->findByType($type)) {

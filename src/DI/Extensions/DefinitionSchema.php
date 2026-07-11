@@ -171,6 +171,7 @@ class DefinitionSchema implements Schema
 			'setup' => Expect::listOf('callable|Nette\DI\Definitions\Statement|array:1'),
 			'inject' => Expect::bool(),
 			'autowired' => Expect::type('bool|string|array'),
+			'transient' => Expect::bool(),
 			'tag' => Expect::type('string|null'),
 			'tags' => Expect::array(),
 			'reset' => Expect::array(),

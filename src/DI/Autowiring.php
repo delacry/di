@@ -54,6 +54,15 @@ class Autowiring
 					throw new MissingServiceException(sprintf("Service of type '%s' not found. Check the class name because it cannot be found.", $type));
 				}
 
+				foreach ($this->builder->getDefinitions() as $def) {
+					if ($def->isTransient() && $def->getType() !== null && is_a($def->getType(), $type, allow_string: true)) {
+						throw new ServiceCreationException(sprintf(
+							'Service of type %s is transient and cannot be autowired into a shared service — inject a factory or use Container::create().',
+							$type,
+						));
+					}
+				}
+
 				throw new MissingServiceException(sprintf('Service of type %s not found. Did you add it to configuration file?', $type));
 			}
 

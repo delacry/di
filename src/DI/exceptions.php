@@ -32,6 +32,15 @@ class ServiceCreationException extends Nette\InvalidStateException
 
 
 /**
+ * A shared-access API was used on a transient service (get() on a per-call service)
+ * or a transient-access API on a shared one (create() on a singleton).
+ */
+class TransientServiceException extends Nette\InvalidStateException
+{
+}
+
+
+/**
  * Operation is not allowed while container is resolving dependencies.
  */
 class NotAllowedDuringResolvingException extends Nette\InvalidStateException

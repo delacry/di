@@ -42,6 +42,9 @@ class ContainerBuilder
 	/** @var list<\ReflectionClass<object>|\ReflectionFunctionAbstract|string> */
 	private array $dependencies = [];
 
+	/** @var list<class-string|\Closure(Definitions\ServiceDefinition): bool> */
+	private array $transientRules = [];
+
 
 	public function __construct()
 	{
@@ -214,6 +217,22 @@ class ContainerBuilder
 
 
 	/**
+	 * Registers a rule that marks matching service definitions transient during completion,
+	 * after all extensions ran and types are resolved — so it holds no matter which extension
+	 * registered the definition. A class/interface name matches every definition whose type
+	 * is-a that name; a closure decides per definition. Matched definitions (and any marked
+	 * via setTransient() directly) are withdrawn from autowiring.
+	 * @param  class-string|\Closure(Definitions\ServiceDefinition): bool  $rule
+	 */
+	public function addTransientRule(string|\Closure $rule): static
+	{
+		$this->transientRules[] = $rule;
+		$this->needsResolve = true;
+		return $this;
+	}
+
+
+	/**
 	 * Resolves autowired service name by type (and optionally by identity tag).
 	 * @param  class-string  $type
 	 * @return ($throw is true ? string : ?string)
@@ -330,6 +349,11 @@ class ContainerBuilder
 	public function complete(): void
 	{
 		$this->resolve();
+		$this->applyTransients();
+		if ($this->needsResolve) { // transients were withdrawn from autowiring; rebuild the index
+			$this->resolve();
+		}
+
 		Decoration::apply($this);
 		if ($this->needsResolve) { // decoration rewired autowiring; rebuild the index before completing
 			$this->resolve();
@@ -343,6 +367,44 @@ class ContainerBuilder
 		foreach ($this->definitions as $def) {
 			$resolver->completeDefinition($def);
 		}
+	}
+
+
+	/**
+	 * Applies transient rules and withdraws every transient definition from autowiring.
+	 * Runs after types are resolved, so string rules match by is-a on the resolved type.
+	 */
+	private function applyTransients(): void
+	{
+		foreach ($this->definitions as $def) {
+			if (!$def instanceof Definitions\ServiceDefinition) {
+				continue;
+			}
+
+			if (!$def->isTransient() && $this->matchesTransientRule($def)) {
+				$def->setTransient();
+			}
+
+			if ($def->isTransient() && $def->getAutowired() !== false) {
+				$def->setAutowired(false);
+			}
+		}
+	}
+
+
+	private function matchesTransientRule(Definitions\ServiceDefinition $def): bool
+	{
+		foreach ($this->transientRules as $rule) {
+			if ($rule instanceof \Closure) {
+				if ($rule($def)) {
+					return true;
+				}
+			} elseif ($def->getType() !== null && is_a($def->getType(), $rule, allow_string: true)) {
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 
@@ -369,7 +431,7 @@ class ContainerBuilder
 
 
 	/**
-	 * @return array{tags?: array<string, array<string, mixed>>, serviceTags?: array<string, string>, byTypeAndTag?: array<class-string, array<string, list<string>>>, aliases: array<string, string>, wiring: array<class-string, array<int, list<string>>>}
+	 * @return array{tags?: array<string, array<string, mixed>>, serviceTags?: array<string, string>, byTypeAndTag?: array<class-string, array<string, list<string>>>, aliases: array<string, string>, wiring: array<class-string, array<int, list<string>>>, transients?: array<string, class-string>, transientsByType?: array<class-string, list<string>>}
 	 * @internal
 	 */
 	public function exportMeta(): array
@@ -383,6 +445,11 @@ class ContainerBuilder
 
 			if ($def->getTag() !== Definitions\Definition::DefaultTag) {
 				$meta['serviceTags'][$name] = $def->getTag();
+			}
+
+			if ($def->isTransient() && ($type = $def->getType()) !== null) {
+				$meta['transients'][$name] = $type;
+				$meta['transientsByType'][$type][] = $name;
 			}
 		}
 
